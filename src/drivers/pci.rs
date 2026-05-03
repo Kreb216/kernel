@@ -22,6 +22,8 @@ use pci_types::{
 use crate::arch::pci::PciConfigRegion;
 #[cfg(feature = "virtio-console")]
 use crate::console::IoDevice;
+//TODO: Implement feature
+use crate::drivers::blk::VirtioBlkDriver;
 #[cfg(feature = "virtio-console")]
 use crate::drivers::console::{VirtioConsoleDriver, VirtioUART};
 #[cfg(feature = "virtio-fs")]
@@ -513,6 +515,10 @@ pub(crate) fn init() {
 				#[cfg(feature = "virtio-vsock")]
 				Ok(VirtioDriver::Vsock(drv)) => {
 					register_driver(PciDriver::VirtioVsock(InterruptTicketMutex::new(*drv)));
+				}
+				// TODO: Implement feature
+				Ok(VirtioDriver::Blk(drv)) => {
+					error!("Block device: initialization not implemented!");
 				}
 				Err(err) => error!("Could not initialize virtio-pci device: {err}"),
 			}

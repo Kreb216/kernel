@@ -165,6 +165,8 @@ where
 pub mod error {
 	use thiserror::Error;
 
+	//TODO: Implement feature
+	pub use crate::drivers::blk::error::VirtioBlkError;
 	#[cfg(feature = "virtio-console")]
 	pub use crate::drivers::console::error::VirtioConsoleError;
 	#[cfg(feature = "virtio-fs")]
@@ -222,6 +224,10 @@ pub mod error {
 		#[cfg(feature = "virtio-vsock")]
 		#[error(transparent)]
 		VsockDriver(VirtioVsockError),
+
+		//TODO:Implement feature
+		#[error(transparent)]
+		VirtioBlkDriver(VirtioBlkError),
 
 		#[cfg(feature = "virtio-console")]
 		#[error(transparent)]

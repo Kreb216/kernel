@@ -19,6 +19,8 @@ use volatile::access::ReadOnly;
 use volatile::{VolatilePtr, VolatileRef};
 
 use crate::arch::pci::PciConfigRegion;
+//TODO: Implement feature
+use crate::drivers::blk::VirtioBlkDriver;
 #[cfg(feature = "virtio-console")]
 use crate::drivers::console::VirtioConsoleDriver;
 use crate::drivers::error::DriverError;
@@ -716,6 +718,19 @@ pub(crate) fn init_device(
 				Err(DriverError::InitVirtioDevFail(virtio_error))
 			}
 		},
+		//TODO: Implement feature
+		virtio::Id::Block => match VirtioBlkDriver::init(device) {
+			Ok(virt_blk_drv) => {
+				info!("Virtio blk driver initialized.");
+				Ok(VirtioDriver::Blk(alloc::boxed::Box::new(virt_blk_drv)))
+			}
+			Err(virtio_error) => {
+				error!(
+					"Virtio blk driver could not be initialized with device because driver is not implemented :D : {device_id:x}"
+				);
+				Err(DriverError::InitVirtioDevFail(virtio_error))
+			}
+		},
 		id => {
 			if let Some(feature) = id.as_feature() {
 				error!("Virtio driver {id:?} is currently not active.");
@@ -745,4 +760,6 @@ pub(crate) enum VirtioDriver {
 	Net(alloc::boxed::Box<VirtioNetDriver>),
 	#[cfg(feature = "virtio-vsock")]
 	Vsock(alloc::boxed::Box<VirtioVsockDriver>),
+	// TODO: Implement feature
+	Blk(alloc::boxed::Box<VirtioBlkDriver>),
 }
