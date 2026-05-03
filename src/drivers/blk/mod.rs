@@ -1,10 +1,9 @@
 #![allow(dead_code)]
 
+#[cfg(feature = "pci")]
+pub mod pci;
+
 pub(crate) struct RequestQueue {}
-use crate::arch::pci::PciConfigRegion;
-use crate::drivers::blk::error::VirtioBlkError::NoDevCfg;
-use crate::drivers::pci::PciDevice;
-use crate::drivers::virtio::error::VirtioError;
 
 /// Error module of virtio blk device driver.
 pub mod error {
@@ -22,12 +21,4 @@ pub mod error {
 
 pub(crate) struct VirtioBlkDriver {
 	pub(super) request_vq: RequestQueue,
-}
-
-impl VirtioBlkDriver {
-	pub(crate) fn init(
-		device: &PciDevice<PciConfigRegion>,
-	) -> Result<VirtioBlkDriver, VirtioError> {
-		Err(VirtioError::VirtioBlkDriver(NoDevCfg(device.device_id())))
-	}
 }
