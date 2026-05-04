@@ -5,6 +5,10 @@ pub mod pci;
 
 pub(crate) struct RequestQueue {}
 
+pub(crate) struct VirtioBlkDriver {
+	pub(super) request_vq: RequestQueue,
+}
+
 /// Error module of virtio blk device driver.
 pub mod error {
 	use thiserror::Error;
@@ -17,8 +21,4 @@ pub mod error {
 		)]
 		NoDevCfg(u16),
 	}
-}
-
-pub(crate) struct VirtioBlkDriver {
-	pub(super) request_vq: RequestQueue,
 }
