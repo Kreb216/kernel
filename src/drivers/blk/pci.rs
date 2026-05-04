@@ -2,9 +2,24 @@ use crate::arch::pci::PciConfigRegion;
 use crate::drivers::blk::VirtioBlkDriver;
 use crate::drivers::pci::PciDevice;
 use crate::drivers::virtio::error::{self, VirtioError};
-use crate::drivers::virtio::transport::pci;
+use crate::drivers::virtio::transport::pci::UniCapsColl;
 
 impl VirtioBlkDriver {
+    pub(crate) fn new(
+        caps_coll: UniCapsColl
+        device: &PciDevice<PciConfigRegion>,
+    ) -> Result<VirtioBlkDriver, VirtioError> {
+        let device_id = device.device_id();
+
+        let UniCapsColl {
+			com_cfg,
+			notif_cfg,
+			isr_cfg,
+			dev_cfg_list,
+			..
+		} = caps_coll;
+    }
+
 	pub(crate) fn init(
 		device: &PciDevice<PciConfigRegion>,
 	) -> Result<VirtioBlkDriver, VirtioError> {
