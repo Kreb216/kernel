@@ -4,50 +4,22 @@
 pub mod pci;
 
 use pci_types::InterruptLine;
-use virtio::{le16, le32, le64};
 
+#[cfg(feature = "pci")]
+use crate::drivers::blk::pci::BlkDevCfgRaw;
 use crate::drivers::virtio::transport::pci::{ComCfg, IsrStatus, NotifCfg};
 
-pub(crate) struct RequestQueue {}
+pub(crate) struct RequestQueue {
 
-pub struct VirtioBlkGeometry {
-	cylinders: le16,
-	heads: u8,
-	sectors: u8,
 }
 
-pub struct VirtioBlkTopology {
-	// # of logical blocks per physical block (log2)
-	physical_block_exp: u8,
-	// offset of first aligned logical block
-	alignment_offset: u8,
-	// suggested minimum I/O size in blocks
-	min_io_size: le16,
-	// optimal (suggested maximum) I/O size in blocks
-	opt_io_size: le32,
-}
-
-//TODO: Comment
+/// A wrapper struct for the raw configuration structure.
+/// Handling the right access to fields, as some are read-only
+/// for the driver.
 pub(crate) struct BlkDevCfg {
-	pub capacity: le64,
-	pub size_max: le32,
-	pub seg_max: le32,
-	pub geometry: VirtioBlkGeometry,
-	pub blk_size: le32,
-	pub topology: VirtioBlkTopology,
-	pub writeback: u8,
-	pub unused0: u8,
-	pub num_queues: u8,
-	pub max_discard_sectors: le32,
-	pub max_discard_seg: le32,
-	pub discard_sector_alignment: le32,
-	pub max_write_zeroes_sectors: le32,
-	pub max_write_zeroes_seg: le32,
-	pub write_zeroes_may_unmap: u8,
-	pub unused1: [u8; 3],
-	pub max_secure_erase_sectors: le32,
-	pub max_secure_erase_seg: le32,
-	pub secure_erase_sector_alignment: le32,
+	pub raw: &'static BlkDevCfgRaw,
+	pub dev_id: u16,
+	pub features: , //TODO
 }
 
 pub(crate) struct VirtioBlkDriver {
