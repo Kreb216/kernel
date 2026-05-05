@@ -4,20 +4,37 @@
 pub mod pci;
 
 use pci_types::InterruptLine;
-use virtio::{le32, le64};
+use virtio::{le16, le32, le64};
 
 use crate::drivers::virtio::transport::pci::{ComCfg, IsrStatus, NotifCfg};
 
 pub(crate) struct RequestQueue {}
+
+pub struct VirtioBlkGeometry {
+	cylinders: le16,
+	heads: u8,
+	sectors: u8,
+}
+
+pub struct VirtioBlkTopology {
+	// # of logical blocks per physical block (log2)
+	physical_block_exp: u8,
+	// offset of first aligned logical block
+	alignment_offset: u8,
+	// suggested minimum I/O size in blocks
+	min_io_size: le16,
+	// optimal (suggested maximum) I/O size in blocks
+	opt_io_size: le32,
+}
 
 //TODO: Comment
 pub(crate) struct BlkDevCfg {
 	pub capacity: le64,
 	pub size_max: le32,
 	pub seg_max: le32,
-	pub geometry: virtio_blk_geometry,
+	pub geometry: VirtioBlkGeometry,
 	pub blk_size: le32,
-	pub topology: virtio_blk_topology,
+	pub topology: VirtioBlkTopology,
 	pub writeback: u8,
 	pub unused0: u8,
 	pub num_queues: u8,
