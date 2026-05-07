@@ -1,4 +1,5 @@
 use virtio::{le16, le32, le64};
+use volatile::VolatileRef;
 
 use crate::arch::pci::PciConfigRegion;
 use crate::drivers::blk::{BlkDevCfg, RequestQueue, VirtioBlkDriver};
@@ -7,54 +8,16 @@ use crate::drivers::virtio::error::{self, VirtioError};
 use crate::drivers::virtio::transport::pci;
 use crate::drivers::virtio::transport::pci::{PciCap, UniCapsColl};
 
-pub struct VirtioBlkGeometry {
-	cylinders: le16,
-	heads: u8,
-	sectors: u8,
-}
-
-pub struct VirtioBlkTopology {
-	// # of logical blocks per physical block (log2)
-	physical_block_exp: u8,
-	// offset of first aligned logical block
-	alignment_offset: u8,
-	// suggested minimum I/O size in blocks
-	min_io_size: le16,
-	// optimal (suggested maximum) I/O size in blocks
-	opt_io_size: le32,
-}
-
-//TODO: Comment
-pub(crate) struct BlkDevCfgRaw {
-	pub capacity: le64,
-	pub size_max: le32,
-	pub seg_max: le32,
-	pub geometry: VirtioBlkGeometry,
-	pub blk_size: le32,
-	pub topology: VirtioBlkTopology,
-	pub writeback: u8,
-	pub unused0: u8,
-	pub num_queues: u8,
-	pub max_discard_sectors: le32,
-	pub max_discard_seg: le32,
-	pub discard_sector_alignment: le32,
-	pub max_write_zeroes_sectors: le32,
-	pub max_write_zeroes_seg: le32,
-	pub write_zeroes_may_unmap: u8,
-	pub unused1: [u8; 3],
-	pub max_secure_erase_sectors: le32,
-	pub max_secure_erase_seg: le32,
-	pub secure_erase_sector_alignment: le32,
-}
-
 impl VirtioBlkDriver {
 	fn map_cfg(cap: &PciCap) -> Option<BlkDevCfg> {
-		let dev_cfg = pci::map_dev_cfg::<BlkDevCfgRaw>(cap)?;
+		let dev_cfg = pci::map_dev_cfg::<virtio::blk::Config>(cap)?;
+
+		let dev_cfg = VolatileRef::from_ref(dev_cfg);
 
 		Some(BlkDevCfg {
 			raw: dev_cfg,
 			dev_id: cap.dev_id(),
-			features: , //TODO
+			features: virtio::blk::F::empty(),
 		})
 	}
 
@@ -79,7 +42,7 @@ impl VirtioBlkDriver {
 		};
 
 		Ok(VirtioBlkDriver {
-		dev_cfg,
+			dev_cfg,
 			com_cfg,
 			isr_stat: isr_cfg,
 			notif_cfg,

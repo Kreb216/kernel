@@ -4,22 +4,21 @@
 pub mod pci;
 
 use pci_types::InterruptLine;
+use volatile::VolatileRef;
+use volatile::access::ReadOnly;
 
 #[cfg(feature = "pci")]
-use crate::drivers::blk::pci::BlkDevCfgRaw;
 use crate::drivers::virtio::transport::pci::{ComCfg, IsrStatus, NotifCfg};
 
-pub(crate) struct RequestQueue {
-
-}
+pub(crate) struct RequestQueue {}
 
 /// A wrapper struct for the raw configuration structure.
 /// Handling the right access to fields, as some are read-only
 /// for the driver.
 pub(crate) struct BlkDevCfg {
-	pub raw: &'static BlkDevCfgRaw,
+	pub raw: VolatileRef<'static, virtio::blk::Config, ReadOnly>,
 	pub dev_id: u16,
-	pub features: , //TODO
+	pub features: virtio::blk::F,
 }
 
 pub(crate) struct VirtioBlkDriver {
