@@ -38,9 +38,7 @@ pub mod error {
 	/// Virtio Blk device error enum.
 	#[derive(Error, Debug, Copy, Clone)]
 	pub enum VirtioBlkError {
-		#[error(
-			"Virtio Blk device driver failed, for device {0:x}, due to driver not being implemented :D!"
-		)]
-		NoDevCfg(u16),
+		#[error("Virtio Blk device driver failed, for device {0:x}")]
+		BlkDevError(u16),
 	}
 }

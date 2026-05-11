@@ -38,7 +38,7 @@ impl VirtioBlkDriver {
 
 		let Some(dev_cfg) = dev_cfg_list.iter().find_map(VirtioBlkDriver::map_cfg) else {
 			error!("No dev config. Aborting!");
-			return Err(error::VirtioBlkError::NoDevCfg(device_id));
+			return Err(error::VirtioBlkError::BlkDevError(device_id));
 		};
 
 		Ok(VirtioBlkDriver {
