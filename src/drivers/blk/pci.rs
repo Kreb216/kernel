@@ -1,4 +1,3 @@
-use virtio::{le16, le32, le64};
 use volatile::VolatileRef;
 
 use crate::arch::pci::PciConfigRegion;

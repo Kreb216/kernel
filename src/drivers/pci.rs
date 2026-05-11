@@ -338,6 +338,8 @@ pub(crate) enum PciDriver {
 	VirtioConsole(InterruptTicketMutex<VirtioConsoleDriver>),
 	#[cfg(feature = "virtio-vsock")]
 	VirtioVsock(InterruptTicketMutex<VirtioVsockDriver>),
+	//TODO: implement feature
+	VirtioBlk(InterruptTicketMutex<VirtioBlkDriver>),
 }
 
 impl PciDriver {
@@ -364,6 +366,15 @@ impl PciDriver {
 		match self {
 			Self::VirtioFs(drv) => Some(drv),
 			#[allow(unreachable_patterns)]
+			_ => None,
+		}
+	}
+
+	//TODO: Implement feature
+	fn get_blk_driver(&self) -> Option<&InterruptTicketMutex<VirtioBlkDriver>> {
+		#[allow(unreachable_patterns)]
+		match self {
+			Self::VirtioBlk(drv) => Some(drv),
 			_ => None,
 		}
 	}
@@ -411,6 +422,21 @@ impl PciDriver {
 
 				let irq_number = drv.lock().get_interrupt_number();
 				(irq_number, console_handler)
+			}
+
+			#[cfg(feature = "virtio-vsock")]
+			Self::VirtioBlk(drv) => {
+				fn blk_handler() {
+					let Some(driver) = get_blk_driver() else {
+						return;
+					};
+
+					driver.lock().handle_interrupt();
+				}
+
+				let irq_number = drv.lock().get_interrupt_number();
+
+				(irq_number, blk_handler)
 			}
 			_ => todo!(),
 		}
@@ -473,6 +499,14 @@ pub(crate) fn get_vsock_driver() -> Option<&'static InterruptTicketMutex<VirtioV
 		.find_map(|drv| drv.get_vsock_driver())
 }
 
+// TODO: Implement feature
+pub(crate) fn get_blk_driver() -> Option<&'static InterruptTicketMutex<VirtioBlkDriver>> {
+	PCI_DRIVERS
+		.get()?
+		.iter()
+		.find_map(|drv| drv.get_blk_driver())
+}
+
 #[cfg(feature = "virtio-fs")]
 pub(crate) fn get_filesystem_driver() -> Option<&'static InterruptTicketMutex<VirtioFsDriver>> {
 	PCI_DRIVERS
@@ -518,7 +552,7 @@ pub(crate) fn init() {
 				}
 				// TODO: Implement feature
 				Ok(VirtioDriver::Blk(drv)) => {
-					error!("Block device: initialization not implemented!");
+					register_driver(PciDriver::VirtioBlk(InterruptTicketMutex::new(*drv)));
 				}
 				Err(err) => error!("Could not initialize virtio-pci device: {err}"),
 			}
