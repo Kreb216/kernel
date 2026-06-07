@@ -4,6 +4,7 @@
 pub mod pci;
 use pci_types::InterruptLine;
 use virtio::blk::ConfigVolatileFieldAccess;
+use virtio::le64;
 use volatile::VolatileRef;
 use volatile::access::ReadOnly;
 
@@ -87,7 +88,7 @@ impl VirtioBlkDriver {
 		}
 	}
 
-	/// Initializes the device in adherence to specification. Returns Some(VirtioVsockError)
+	/// Initializes the device in adherence to specification. Returns Some(VirtioBlkError)
 	/// upon failure and None in case everything worked as expected.
 	///
 	/// See Virtio specification v1.1. - 3.1.1.
@@ -145,12 +146,23 @@ impl VirtioBlkDriver {
 
 		// Read block device size
 		let block_size = self.dev_cfg.raw.as_ptr().capacity().read().to_ne() * 512;
-		info!("Block device size: {} bytes", block_size);
+		info!("Block device size: {block_size} bytes");
 
 		// At this point the device is "live"
 		self.com_cfg.drv_ok();
 
 		Ok(())
+	}
+
+	pub fn req(&mut self, req: virtio::blk::Req) {}
+
+	pub fn write_req(&mut self, sector: le64, data: &[u8]) {
+		let mut req = virtio::blk::Req {
+			ty: virtio::blk::T::Out,
+			reserved: 0,
+			sector: sector,
+			data_and_status: data,
+		};
 	}
 }
 
