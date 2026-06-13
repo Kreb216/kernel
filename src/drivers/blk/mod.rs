@@ -2,9 +2,16 @@
 
 #[cfg(feature = "pci")]
 pub mod pci;
+use alloc::alloc::Allocator;
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+use core::ptr::NonNull;
+use core::u8;
+
 use pci_types::InterruptLine;
+use smallvec::SmallVec;
 use virtio::blk::ConfigVolatileFieldAccess;
-use virtio::le64;
+use virtio::{blk, le32, le64};
 use volatile::VolatileRef;
 use volatile::access::ReadOnly;
 
@@ -17,6 +24,7 @@ use crate::drivers::virtio::ControlRegisters;
 use crate::drivers::virtio::transport::pci::{ComCfg, IsrStatus, NotifCfg};
 use crate::drivers::virtio::virtqueue::split::SplitVq;
 use crate::drivers::virtio::virtqueue::{AvailBufferToken, BufferElem, BufferType, Virtq};
+use crate::mm::device_alloc::DeviceAlloc;
 
 pub(crate) struct RequestQueue {
 	vq: Option<VirtQueue>,
@@ -154,15 +162,51 @@ impl VirtioBlkDriver {
 		Ok(())
 	}
 
-	pub fn req(&mut self, req: virtio::blk::Req) {}
+	pub fn alloc_req(
+		&self,
+		ty: virtio::blk::T,
+		sector: le64,
+		data_len: usize,
+		dev_id: u16,
+	) -> Result<Vec<u8, DeviceAlloc>, VirtioBlkError> {
+		let layout = virtio::blk::Req::layout(data_len);
+		let mem = DeviceAlloc
+			.allocate_zeroed(layout)
+			.map_err(|_| VirtioBlkError::BlkDevError(dev_id))?;
+		let mut ptr = virtio::blk::Req::from_ptr(mem).ok_or(VirtioBlkError::BlkDevError(dev_id))?;
 
-	pub fn write_req(&mut self, sector: le64, data: &[u8]) {
-		let mut req = virtio::blk::Req {
-			ty: virtio::blk::T::Out,
-			reserved: 0,
-			sector: sector,
-			data_and_status: data,
+		unsafe {
+			ptr.as_mut().ty = (ty as u32).into();
+			ptr.as_mut().reserved = le32::from_ne(0);
+			ptr.as_mut().sector = sector;
+			let req =
+				Vec::from_raw_parts_in(ptr.as_mut(), layout.size(), layout.size(), DeviceAlloc);
 		};
+
+		Ok(req)
+	}
+
+	pub fn send_req(
+		&mut self,
+		ty: virtio::blk::T,
+		sector: le64,
+		data: &[u8],
+	) -> Result<(), VirtioBlkError> {
+		if !matches!(ty, virtio::blk::T::Out | virtio::blk::T::In) {
+			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
+		}
+		let req = self.alloc_req(ty, sector, data.len(), self.dev_cfg.dev_id)?;
+		let mut vec = SmallVec::with_capacity(data.len());
+		vec.push(BufferElem::Vector(req));
+
+		let buffer_tkn = AvailBufferToken::new(SmallVec::new(), vec).unwrap();
+		let request_result = self
+			.request_vq
+			.vq
+			.as_mut()
+			.ok_or(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id))?
+			.dispatch_blocking(buffer_tkn, BufferType::Direct);
+		Ok(())
 	}
 }
 
