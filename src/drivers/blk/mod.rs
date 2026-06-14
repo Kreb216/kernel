@@ -199,11 +199,17 @@ impl VirtioBlkDriver {
 		dev_id: u16,
 	) -> Result<Vec<u8, DeviceAlloc>, VirtioBlkError> {
 		let layout = virtio::blk::Req::layout(data.len());
+		info!("layout.size(): {}", layout.size());
 		let mem = DeviceAlloc
 			.allocate_zeroed(layout)
 			.map_err(|_| VirtioBlkError::BlkDevError(dev_id))?;
 
-		let mut ptr = virtio::blk::Req::from_ptr(mem).ok_or(VirtioBlkError::BlkDevError(dev_id))?;
+		let req_len = 16 + data.len() + 1;
+		let adjusted_mem = NonNull::slice_from_raw_parts(mem.cast::<u8>(), req_len);
+		info!("mem.len(): {}", adjusted_mem.len());
+
+		let mut ptr =
+			virtio::blk::Req::from_ptr(adjusted_mem).ok_or(VirtioBlkError::BlkDevError(dev_id))?;
 
 		let mut req_box = unsafe { Box::from_raw_in(ptr.as_mut(), DeviceAlloc) };
 
