@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use core::ptr::NonNull;
 use core::u8;
 
+use ::core::ptr;
 use pci_types::InterruptLine;
 use smallvec::SmallVec;
 use virtio::blk::ConfigVolatileFieldAccess;
@@ -159,6 +160,34 @@ impl VirtioBlkDriver {
 		// At this point the device is "live"
 		self.com_cfg.drv_ok();
 
+		self.test_device();
+
+		Ok(())
+	}
+
+	pub fn test_device(&mut self) -> Result<(), VirtioBlkError> {
+		info!("Perform device test");
+
+		let sector = le64::from_ne(2);
+
+		let mut write_data = [0u8; 512];
+		write_data[..4].copy_from_slice(b"test");
+
+		info!("Writing to sector {sector:?}:");
+		info!("Write bytes: {:02x?}", &write_data[..4]);
+
+		self.send_req(virtio::blk::T::Out, sector, &write_data)?;
+
+		let read_buf = [0u8; 512];
+
+		let data = self
+			.send_req(virtio::blk::T::In, sector, &read_buf)?
+			.unwrap();
+
+		info!("Read from sector {sector:?}:");
+		info!("Data bytes: {:02x?}", &data[..4]);
+		info!("Data text: {:?}", core::str::from_utf8(&data[..4]));
+
 		Ok(())
 	}
 
@@ -166,24 +195,30 @@ impl VirtioBlkDriver {
 		&self,
 		ty: virtio::blk::T,
 		sector: le64,
-		data_len: usize,
+		data: &[u8],
 		dev_id: u16,
 	) -> Result<Vec<u8, DeviceAlloc>, VirtioBlkError> {
-		let layout = virtio::blk::Req::layout(data_len);
+		let layout = virtio::blk::Req::layout(data.len());
 		let mem = DeviceAlloc
 			.allocate_zeroed(layout)
 			.map_err(|_| VirtioBlkError::BlkDevError(dev_id))?;
+
 		let mut ptr = virtio::blk::Req::from_ptr(mem).ok_or(VirtioBlkError::BlkDevError(dev_id))?;
 
-		unsafe {
-			ptr.as_mut().ty = (ty as u32).into();
-			ptr.as_mut().reserved = le32::from_ne(0);
-			ptr.as_mut().sector = sector;
-			let req =
-				Vec::from_raw_parts_in(ptr.as_mut(), layout.size(), layout.size(), DeviceAlloc);
-		};
+		let mut req_box = unsafe { Box::from_raw_in(ptr.as_mut(), DeviceAlloc) };
 
-		Ok(req)
+		req_box.ty = (ty as u32).into();
+		req_box.reserved = le32::from_ne(0);
+		req_box.sector = sector;
+
+		info!("data.len(): {}", data.len());
+		info!("req_box.data_mut().len(): {}", req_box.data_mut().len());
+		req_box.data_mut().copy_from_slice(data); //TODO
+
+		let raw_ptr = Box::into_raw_with_allocator(req_box).0.cast::<u8>();
+		let req_as_vec = unsafe { Vec::from_raw_parts_in(raw_ptr, 1, 1, DeviceAlloc) };
+
+		Ok(req_as_vec)
 	}
 
 	pub fn send_req(
@@ -191,22 +226,46 @@ impl VirtioBlkDriver {
 		ty: virtio::blk::T,
 		sector: le64,
 		data: &[u8],
-	) -> Result<(), VirtioBlkError> {
+	) -> Result<(Option<&[u8]>), VirtioBlkError> {
 		if !matches!(ty, virtio::blk::T::Out | virtio::blk::T::In) {
 			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
 		}
-		let req = self.alloc_req(ty, sector, data.len(), self.dev_cfg.dev_id)?;
+
+		let req = self.alloc_req(ty, sector, data, self.dev_cfg.dev_id)?;
+
 		let mut vec = SmallVec::with_capacity(data.len());
 		vec.push(BufferElem::Vector(req));
 
 		let buffer_tkn = AvailBufferToken::new(SmallVec::new(), vec).unwrap();
-		let request_result = self
+		let mut request_result = self
 			.request_vq
 			.vq
 			.as_mut()
 			.ok_or(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id))?
-			.dispatch_blocking(buffer_tkn, BufferType::Direct);
-		Ok(())
+			.dispatch_blocking(buffer_tkn, BufferType::Direct)
+			.map_err(|_| VirtioBlkError::BlkDevError(self.dev_cfg.dev_id))?;
+
+		// Check status byte
+		let vec: Vec<u8, DeviceAlloc> = request_result.used_recv_buff.pop_front_vec().unwrap();
+
+		let (ptr, len, cap, alloc) = Vec::into_raw_parts_with_alloc(vec);
+		let nn_u8: NonNull<u8> =
+			NonNull::new(ptr).ok_or(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id))?;
+		let nn_slice: NonNull<[u8]> = NonNull::slice_from_raw_parts(nn_u8, len);
+		let req_ptr: NonNull<virtio::blk::Req> = virtio::blk::Req::from_ptr(nn_slice)
+			.ok_or(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id))?;
+
+		let req: &virtio::blk::Req = unsafe { req_ptr.as_ref() };
+
+		if *req.status().unwrap() != virtio::blk::S::OK as u8 {
+			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
+		}
+
+		if ty == virtio::blk::T::In {
+			return Ok(Some(req.data()));
+		}
+
+		Ok(None)
 	}
 }
 
