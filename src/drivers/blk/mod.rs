@@ -42,6 +42,7 @@ impl RequestQueue {
 	}
 }
 
+#[repr(C)]
 pub struct ReqHdr {
 	pub ty: le32,
 	pub reserved: le32,
@@ -175,7 +176,7 @@ impl VirtioBlkDriver {
 	pub fn test_device(&mut self) -> Result<(), VirtioBlkError> {
 		info!("Perform device test");
 
-		let sector = le64::from_ne(2);
+		let sector = le64::from_ne(3);
 
 		let mut write_data = [0u8; 512];
 		write_data[..4].copy_from_slice(b"test");
