@@ -273,12 +273,10 @@ impl VirtioBlkDriver {
 		let status = recieved_status.0.downcast::<u8>().unwrap();
 
 		if *status != virtio::blk::S::OK as u8 {
-			info!("ERROR: {}", *status);
 			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
 		}
 
 		if ty == virtio::blk::T::In {
-			info!("READ REQ");
 			return Ok(recieved_data);
 		}
 
