@@ -5,6 +5,7 @@ pub mod pci;
 use alloc::alloc::Allocator;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
+use core::alloc::Layout;
 use core::ptr::NonNull;
 use core::u8;
 
@@ -39,6 +40,12 @@ impl RequestQueue {
 	pub fn add(&mut self, vq: VirtQueue) {
 		self.vq = Some(vq);
 	}
+}
+
+pub struct ReqHdr {
+	pub ty: le32,
+	pub reserved: le32,
+	pub sector: le64,
 }
 
 /// A wrapper struct for the raw configuration structure.
@@ -179,7 +186,6 @@ impl VirtioBlkDriver {
 		self.send_req(virtio::blk::T::Out, sector, &write_data)?;
 
 		let read_buf = [0u8; 512];
-
 		let data = self
 			.send_req(virtio::blk::T::In, sector, &read_buf)?
 			.unwrap();
@@ -197,34 +203,25 @@ impl VirtioBlkDriver {
 		sector: le64,
 		data: &[u8],
 		dev_id: u16,
-	) -> Result<Vec<u8, DeviceAlloc>, VirtioBlkError> {
-		let layout = virtio::blk::Req::layout(data.len());
-		info!("layout.size(): {}", layout.size());
-		let mem = DeviceAlloc
-			.allocate_zeroed(layout)
-			.map_err(|_| VirtioBlkError::BlkDevError(dev_id))?;
+	) -> Result<
+		(
+			Box<ReqHdr, DeviceAlloc>,
+			Vec<u8, DeviceAlloc>,
+			Box<u8, DeviceAlloc>,
+		),
+		VirtioBlkError,
+	> {
+		let req_hdr = ReqHdr {
+			ty: (ty as u32).into(),
+			reserved: le32::from_ne(0),
+			sector,
+		};
 
-		let req_len = 16 + data.len() + 1;
-		let adjusted_mem = NonNull::slice_from_raw_parts(mem.cast::<u8>(), req_len);
-		info!("mem.len(): {}", adjusted_mem.len());
+		let hdr_box = Box::new_in(req_hdr, DeviceAlloc);
+		let data_vec = data.to_vec_in(DeviceAlloc);
+		let status = Box::new_in(0, DeviceAlloc);
 
-		let mut ptr =
-			virtio::blk::Req::from_ptr(adjusted_mem).ok_or(VirtioBlkError::BlkDevError(dev_id))?;
-
-		let mut req_box = unsafe { Box::from_raw_in(ptr.as_mut(), DeviceAlloc) };
-
-		req_box.ty = (ty as u32).into();
-		req_box.reserved = le32::from_ne(0);
-		req_box.sector = sector;
-
-		info!("data.len(): {}", data.len());
-		info!("req_box.data_mut().len(): {}", req_box.data_mut().len());
-		req_box.data_mut().copy_from_slice(data); //TODO
-
-		let raw_ptr = Box::into_raw_with_allocator(req_box).0.cast::<u8>();
-		let req_as_vec = unsafe { Vec::from_raw_parts_in(raw_ptr, 1, 1, DeviceAlloc) };
-
-		Ok(req_as_vec)
+		Ok((hdr_box, data_vec, status))
 	}
 
 	pub fn send_req(
@@ -232,17 +229,30 @@ impl VirtioBlkDriver {
 		ty: virtio::blk::T,
 		sector: le64,
 		data: &[u8],
-	) -> Result<(Option<&[u8]>), VirtioBlkError> {
+	) -> Result<Option<Vec<u8, DeviceAlloc>>, VirtioBlkError> {
 		if !matches!(ty, virtio::blk::T::Out | virtio::blk::T::In) {
 			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
 		}
 
-		let req = self.alloc_req(ty, sector, data, self.dev_cfg.dev_id)?;
+		let (hdr, data, status) = self.alloc_req(ty, sector, data, self.dev_cfg.dev_id)?;
 
-		let mut vec = SmallVec::with_capacity(data.len());
-		vec.push(BufferElem::Vector(req));
+		let mut send = SmallVec::new();
+		send.push(BufferElem::Sized(hdr));
+		let mut recv = SmallVec::new();
 
-		let buffer_tkn = AvailBufferToken::new(SmallVec::new(), vec).unwrap();
+		match ty {
+			virtio::blk::T::In => {
+				recv.push(BufferElem::Vector(data));
+			}
+			virtio::blk::T::Out => {
+				send.push(BufferElem::Vector(data));
+			}
+			_ => return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id)),
+		}
+
+		recv.push(BufferElem::Sized(status));
+
+		let buffer_tkn = AvailBufferToken::new(send, recv).unwrap();
 		let mut request_result = self
 			.request_vq
 			.vq
@@ -252,23 +262,23 @@ impl VirtioBlkDriver {
 			.map_err(|_| VirtioBlkError::BlkDevError(self.dev_cfg.dev_id))?;
 
 		// Check status byte
-		let vec: Vec<u8, DeviceAlloc> = request_result.used_recv_buff.pop_front_vec().unwrap();
+		let recieved_data = if ty == virtio::blk::T::In {
+			Some(request_result.used_recv_buff.pop_front_vec().unwrap())
+		} else {
+			None
+		};
 
-		let (ptr, len, cap, alloc) = Vec::into_raw_parts_with_alloc(vec);
-		let nn_u8: NonNull<u8> =
-			NonNull::new(ptr).ok_or(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id))?;
-		let nn_slice: NonNull<[u8]> = NonNull::slice_from_raw_parts(nn_u8, len);
-		let req_ptr: NonNull<virtio::blk::Req> = virtio::blk::Req::from_ptr(nn_slice)
-			.ok_or(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id))?;
+		let recieved_status = request_result.used_recv_buff.pop_front_raw().unwrap();
+		let status = recieved_status.0.downcast::<u8>().unwrap();
 
-		let req: &virtio::blk::Req = unsafe { req_ptr.as_ref() };
-
-		if *req.status().unwrap() != virtio::blk::S::OK as u8 {
+		if *status != virtio::blk::S::OK as u8 {
+			info!("ERROR: {}", *status);
 			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
 		}
 
 		if ty == virtio::blk::T::In {
-			return Ok(Some(req.data()));
+			info!("READ REQ");
+			return Ok(recieved_data);
 		}
 
 		Ok(None)
