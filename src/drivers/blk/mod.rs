@@ -6,7 +6,9 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
-use embedded_sdmmc::{Block, BlockCount, BlockDevice, BlockIdx};
+use embedded_sdmmc::{
+	Block, BlockCount, BlockDevice, BlockIdx, Mode, TimeSource, Timestamp, VolumeIdx, VolumeManager,
+};
 use pci_types::InterruptLine;
 use smallvec::SmallVec;
 use virtio::blk::ConfigVolatileFieldAccess;
@@ -167,11 +169,27 @@ impl VirtioBlkDriver {
 		// At this point the device is "live"
 		self.com_cfg.drv_ok();
 
-		match self.test_device() {
-			Ok(()) => info!("Test Succesful!"),
+		// match self.test_device() {
+		// 	Ok(()) => info!("Test Succesful!"),
+		// 	Err(e) => {
+		// 		error!("Virtio-blk test failed: {e:?}");
+		// 		return Err(e);
+		// 	}
+		// }
+
+		// match self.test_sdmmc_adapter() {
+		// 	Ok(()) => info!("Test Succesful!"),
+		// 	Err(e) => {
+		// 		error!("Adapter test failed: {e:?}");
+		// 		return Err(e);
+		// 	}
+		// }
+
+		match self.test_fat() {
+			Ok(()) => info!("FAT Test Succesful!"),
 			Err(e) => {
-				error!("Virtio-blk test failed: {e:?}");
-				return Err(e);
+				error!("FAT test failed: {e:?}");
+				return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
 			}
 		}
 
@@ -198,6 +216,49 @@ impl VirtioBlkDriver {
 		info!("Read from sector {sector:?}:");
 		info!("Data bytes: {:02x?}", &read_buf[..4]);
 		info!("Data text: {:?}", core::str::from_utf8(&read_buf[..4]));
+
+		Ok(())
+	}
+
+	pub fn test_sdmmc_adapter(&mut self) -> Result<(), VirtioBlkError> {
+		info!("Testing SdmmcBlkAdapter");
+
+		let adapter = SdmmcBlkAdapter::new(self);
+
+		let mut write_blocks = [Block::new(); 1];
+		write_blocks[0].contents[..4].copy_from_slice(b"sdmc");
+
+		adapter.write(&write_blocks, BlockIdx(4))?;
+
+		let mut read_blocks = [Block::new(); 1];
+		adapter.read(&mut read_blocks, BlockIdx(4))?;
+
+		info!("Adapter read bytes: {:02x?}", &read_blocks[0].contents[..4]);
+		info!(
+			"Adapter read text: {:?}",
+			core::str::from_utf8(&read_blocks[0].contents[..4])
+		);
+
+		if &read_blocks[0].contents[..4] != b"sdmc" {
+			return Err(VirtioBlkError::BlkDevError(
+				adapter.dev.borrow().dev_cfg.dev_id,
+			));
+		}
+
+		Ok(())
+	}
+
+	pub fn test_fat(&mut self) -> Result<(), embedded_sdmmc::Error<VirtioBlkError>> {
+		let adapter = SdmmcBlkAdapter::new(self);
+		let volume_mgr = VolumeManager::new(adapter, DummyTimeSource);
+
+		let volume0 = volume_mgr.open_volume(VolumeIdx(0))?;
+		let root_dir = volume0.open_root_dir()?;
+
+		let file = root_dir.open_file_in_dir("OHA.TXT", Mode::ReadWriteCreateOrTruncate)?;
+
+		file.write(b"hello from virtio blk\n")?;
+		file.flush()?;
 
 		Ok(())
 	}
@@ -340,6 +401,21 @@ impl<'a> BlockDevice for SdmmcBlkAdapter<'a> {
 		let blocks = dev.dev_cfg.raw.as_ptr().capacity().read().to_ne();
 
 		Ok(BlockCount(blocks as u32))
+	}
+}
+
+pub struct DummyTimeSource;
+
+impl TimeSource for DummyTimeSource {
+	fn get_timestamp(&self) -> Timestamp {
+		Timestamp {
+			year_since_1970: 56,
+			zero_indexed_month: 0,
+			zero_indexed_day: 0,
+			hours: 0,
+			minutes: 0,
+			seconds: 0,
+		}
 	}
 }
 
