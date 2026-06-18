@@ -168,7 +168,13 @@ impl VirtioBlkDriver {
 		// At this point the device is "live"
 		self.com_cfg.drv_ok();
 
-		self.test_device();
+		match self.test_device() {
+			Ok(()) => info!("Test Succesful!"),
+			Err(e) => {
+				error!("Virtio-blk test failed: {e:?}");
+				return Err(e);
+			}
+		}
 
 		Ok(())
 	}
@@ -184,26 +190,77 @@ impl VirtioBlkDriver {
 		info!("Writing to sector {sector:?}:");
 		info!("Write bytes: {:02x?}", &write_data[..4]);
 
-		self.send_req(virtio::blk::T::Out, sector, &write_data)?;
+		self.write_sector(sector, &write_data)?;
 
-		let read_buf = [0u8; 512];
-		let data = self
-			.send_req(virtio::blk::T::In, sector, &read_buf)?
-			.unwrap();
+		let mut read_buf = [0u8; 512];
+
+		self.read_sector(sector, &mut read_buf)?;
 
 		info!("Read from sector {sector:?}:");
-		info!("Data bytes: {:02x?}", &data[..4]);
-		info!("Data text: {:?}", core::str::from_utf8(&data[..4]));
+		info!("Data bytes: {:02x?}", &read_buf[..4]);
+		info!("Data text: {:?}", core::str::from_utf8(&read_buf[..4]));
 
 		Ok(())
 	}
 
-	pub fn alloc_req(
+	pub fn read_sector(&mut self, sector: le64, buf: &mut [u8; 512]) -> Result<(), VirtioBlkError> {
+		let (hdr, data_vec, status) = self.alloc_req(virtio::blk::T::In, sector, buf)?;
+
+		let mut send = SmallVec::new();
+		send.push(BufferElem::Sized(hdr));
+
+		let mut recv = SmallVec::new();
+		recv.push(BufferElem::Vector(data_vec));
+		recv.push(BufferElem::Sized(status));
+
+		let mut request_result = self.send_req(send, recv)?;
+
+		// Check status byte
+		let recieved_data = request_result.used_recv_buff.pop_front_vec().unwrap();
+
+		let recieved_status = request_result.used_recv_buff.pop_front_raw().unwrap();
+		let status = recieved_status.0.downcast::<u8>().unwrap();
+
+		if *status != virtio::blk::S::OK as u8 {
+			info!("read status: {}", *status);
+			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
+		}
+
+		// Copy read data into the buffer
+		buf.copy_from_slice(&recieved_data);
+
+		Ok(())
+	}
+
+	pub fn write_sector(&mut self, sector: le64, buf: &[u8; 512]) -> Result<(), VirtioBlkError> {
+		let (hdr, data_vec, status) = self.alloc_req(virtio::blk::T::Out, sector, buf)?;
+
+		let mut send = SmallVec::new();
+		send.push(BufferElem::Sized(hdr));
+		send.push(BufferElem::Vector(data_vec));
+
+		let mut recv = SmallVec::new();
+		recv.push(BufferElem::Sized(status));
+
+		let mut request_result = self.send_req(send, recv)?;
+
+		// Check status byte
+		let recieved_status = request_result.used_recv_buff.pop_front_raw().unwrap();
+		let status = recieved_status.0.downcast::<u8>().unwrap();
+
+		if *status != virtio::blk::S::OK as u8 {
+			info!("write status: {}", *status);
+			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
+		}
+
+		Ok(())
+	}
+
+	fn alloc_req(
 		&self,
 		ty: virtio::blk::T,
 		sector: le64,
-		data: &[u8],
-		dev_id: u16,
+		buf: &[u8],
 	) -> Result<
 		(
 			Box<ReqHdr, DeviceAlloc>,
@@ -212,49 +269,26 @@ impl VirtioBlkDriver {
 		),
 		VirtioBlkError,
 	> {
-		let req_hdr = ReqHdr {
+		let hdr = ReqHdr {
 			ty: (ty as u32).into(),
 			reserved: le32::from_ne(0),
 			sector,
 		};
 
-		let hdr_box = Box::new_in(req_hdr, DeviceAlloc);
-		let data_vec = data.to_vec_in(DeviceAlloc);
+		let hdr_box = Box::new_in(hdr, DeviceAlloc);
+		let data_vec = buf.to_vec_in(DeviceAlloc);
 		let status = Box::new_in(0, DeviceAlloc);
 
 		Ok((hdr_box, data_vec, status))
 	}
 
-	pub fn send_req(
+	fn send_req(
 		&mut self,
-		ty: virtio::blk::T,
-		sector: le64,
-		data: &[u8],
-	) -> Result<Option<Vec<u8, DeviceAlloc>>, VirtioBlkError> {
-		if !matches!(ty, virtio::blk::T::Out | virtio::blk::T::In) {
-			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
-		}
-
-		let (hdr, data, status) = self.alloc_req(ty, sector, data, self.dev_cfg.dev_id)?;
-
-		let mut send = SmallVec::new();
-		send.push(BufferElem::Sized(hdr));
-		let mut recv = SmallVec::new();
-
-		match ty {
-			virtio::blk::T::In => {
-				recv.push(BufferElem::Vector(data));
-			}
-			virtio::blk::T::Out => {
-				send.push(BufferElem::Vector(data));
-			}
-			_ => return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id)),
-		}
-
-		recv.push(BufferElem::Sized(status));
-
+		send: SmallVec<[BufferElem; 2]>,
+		recv: SmallVec<[BufferElem; 2]>,
+	) -> Result<UsedBufferToken, VirtioBlkError> {
 		let buffer_tkn = AvailBufferToken::new(send, recv).unwrap();
-		let mut request_result = self
+		let request_result = self
 			.request_vq
 			.vq
 			.as_mut()
@@ -262,25 +296,7 @@ impl VirtioBlkDriver {
 			.dispatch_blocking(buffer_tkn, BufferType::Direct)
 			.map_err(|_| VirtioBlkError::BlkDevError(self.dev_cfg.dev_id))?;
 
-		// Check status byte
-		let recieved_data = if ty == virtio::blk::T::In {
-			Some(request_result.used_recv_buff.pop_front_vec().unwrap())
-		} else {
-			None
-		};
-
-		let recieved_status = request_result.used_recv_buff.pop_front_raw().unwrap();
-		let status = recieved_status.0.downcast::<u8>().unwrap();
-
-		if *status != virtio::blk::S::OK as u8 {
-			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
-		}
-
-		if ty == virtio::blk::T::In {
-			return Ok(recieved_data);
-		}
-
-		Ok(None)
+		Ok(request_result)
 	}
 }
 
