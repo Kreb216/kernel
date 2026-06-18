@@ -348,6 +348,7 @@ thiserror = { version = "2", default-features = false }
 time = { version = "0.3", default-features = false }
 volatile = "0.6"
 uhyve-interface = { version = "0.2", optional = true }
+embedded-sdmmc = "0.9.0"
 
 [dependencies.smoltcp]
 version = "0.13"

@@ -6,12 +6,16 @@ use alloc::alloc::Allocator;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::alloc::Layout;
+use core::cell::RefCell;
 use core::ptr::NonNull;
 use core::u8;
 
 use ::core::ptr;
+use embedded_sdmmc::{Block, BlockCount, BlockDevice, BlockIdx};
 use pci_types::InterruptLine;
+use rand_chacha::rand_core::block;
 use smallvec::SmallVec;
+use uart_16550::LoopbackError::SendError;
 use virtio::blk::ConfigVolatileFieldAccess;
 use virtio::{blk, le32, le64};
 use volatile::VolatileRef;
@@ -25,7 +29,9 @@ use crate::drivers::virtio::ControlRegisters;
 #[cfg(feature = "pci")]
 use crate::drivers::virtio::transport::pci::{ComCfg, IsrStatus, NotifCfg};
 use crate::drivers::virtio::virtqueue::split::SplitVq;
-use crate::drivers::virtio::virtqueue::{AvailBufferToken, BufferElem, BufferType, Virtq};
+use crate::drivers::virtio::virtqueue::{
+	AvailBufferToken, BufferElem, BufferType, UsedBufferToken, Virtq,
+};
 use crate::mm::device_alloc::DeviceAlloc;
 
 pub(crate) struct RequestQueue {
@@ -297,6 +303,50 @@ impl VirtioBlkDriver {
 			.map_err(|_| VirtioBlkError::BlkDevError(self.dev_cfg.dev_id))?;
 
 		Ok(request_result)
+	}
+}
+
+// Wrapper struct to use file system crate
+pub struct SdmmcBlkAdapter<'a> {
+	pub dev: RefCell<&'a mut VirtioBlkDriver>,
+}
+
+impl<'a> SdmmcBlkAdapter<'a> {
+	pub fn new(dev: &'a mut VirtioBlkDriver) -> Self {
+		Self {
+			dev: RefCell::new(dev),
+		}
+	}
+}
+
+impl<'a> BlockDevice for SdmmcBlkAdapter<'a> {
+	type Error = VirtioBlkError;
+
+	fn read(&self, blocks: &mut [Block], start_block_idx: BlockIdx) -> Result<(), Self::Error> {
+		let mut dev = self.dev.borrow_mut();
+
+		for (i, block) in blocks.iter_mut().enumerate() {
+			let sector = le64::from_ne(u64::from(start_block_idx.0) + i as u64);
+			dev.read_sector(sector, &mut block.contents)?;
+		}
+		Ok(())
+	}
+
+	fn write(&self, blocks: &[Block], start_block_idx: BlockIdx) -> Result<(), Self::Error> {
+		let mut dev = self.dev.borrow_mut();
+
+		for (i, block) in blocks.iter().enumerate() {
+			let sector = le64::from_ne(u64::from(start_block_idx.0) + i as u64);
+			dev.write_sector(sector, &block.contents)?;
+		}
+		Ok(())
+	}
+
+	fn num_blocks(&self) -> Result<BlockCount, Self::Error> {
+		let dev = self.dev.borrow();
+		let blocks = dev.dev_cfg.raw.as_ptr().capacity().read().to_ne();
+
+		Ok(BlockCount(blocks as u32))
 	}
 }
 
