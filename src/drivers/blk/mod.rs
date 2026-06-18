@@ -2,22 +2,15 @@
 
 #[cfg(feature = "pci")]
 pub mod pci;
-use alloc::alloc::Allocator;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use core::alloc::Layout;
 use core::cell::RefCell;
-use core::ptr::NonNull;
-use core::u8;
 
-use ::core::ptr;
 use embedded_sdmmc::{Block, BlockCount, BlockDevice, BlockIdx};
 use pci_types::InterruptLine;
-use rand_chacha::rand_core::block;
 use smallvec::SmallVec;
-use uart_16550::LoopbackError::SendError;
 use virtio::blk::ConfigVolatileFieldAccess;
-use virtio::{blk, le32, le64};
+use virtio::{le32, le64};
 use volatile::VolatileRef;
 use volatile::access::ReadOnly;
 
