@@ -725,9 +725,7 @@ pub(crate) fn init_device(
 				Ok(VirtioDriver::Blk(alloc::boxed::Box::new(virt_blk_drv)))
 			}
 			Err(virtio_error) => {
-				error!(
-					"Virtio blk driver could not be initialized with device because driver is not implemented :D : {device_id:x}"
-				);
+				error!("Virtio block driver could not be initialized with device: {device_id:x}");
 				Err(DriverError::InitVirtioDevFail(virtio_error))
 			}
 		},
