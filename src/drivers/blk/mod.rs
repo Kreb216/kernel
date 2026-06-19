@@ -255,11 +255,24 @@ impl VirtioBlkDriver {
 		let volume0 = volume_mgr.open_volume(VolumeIdx(0))?;
 		let root_dir = volume0.open_root_dir()?;
 
-		let file = root_dir.open_file_in_dir("OHA.TXT", Mode::ReadWriteCreateOrTruncate)?;
+		let file_name = "OHA.txt";
+		let file = root_dir.open_file_in_dir(file_name, Mode::ReadWriteCreateOrTruncate)?;
 
-		file.write(b"hello from virtio blk\n")?;
+		const TEXT: &[u8] = b"hello from virtio blk\n";
+		file.write(TEXT)?;
 		file.flush()?;
+		file.close()?;
 
+		let file_ro = root_dir.open_file_in_dir(file_name, Mode::ReadOnly)?;
+		while !file_ro.is_eof() {
+			let mut buf = [0u8; TEXT.len()];
+			let num_read = file_ro.read(&mut buf)?;
+
+			info!("Contents of: {file_name}");
+			for b in &buf[..num_read] {
+				info!("{}", *b as char);
+			}
+		}
 		Ok(())
 	}
 
