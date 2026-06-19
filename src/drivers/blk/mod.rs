@@ -2,18 +2,17 @@
 
 #[cfg(feature = "pci")]
 pub mod pci;
-use alloc::alloc::Allocator;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
-use core::alloc::Layout;
-use core::ptr::NonNull;
-use core::u8;
+use core::cell::RefCell;
 
-use ::core::ptr;
+use embedded_sdmmc::{
+	Block, BlockCount, BlockDevice, BlockIdx, Mode, TimeSource, Timestamp, VolumeIdx, VolumeManager,
+};
 use pci_types::InterruptLine;
 use smallvec::SmallVec;
 use virtio::blk::ConfigVolatileFieldAccess;
-use virtio::{blk, le32, le64};
+use virtio::{le32, le64};
 use volatile::VolatileRef;
 use volatile::access::ReadOnly;
 
@@ -25,7 +24,9 @@ use crate::drivers::virtio::ControlRegisters;
 #[cfg(feature = "pci")]
 use crate::drivers::virtio::transport::pci::{ComCfg, IsrStatus, NotifCfg};
 use crate::drivers::virtio::virtqueue::split::SplitVq;
-use crate::drivers::virtio::virtqueue::{AvailBufferToken, BufferElem, BufferType, Virtq};
+use crate::drivers::virtio::virtqueue::{
+	AvailBufferToken, BufferElem, BufferType, UsedBufferToken, Virtq,
+};
 use crate::mm::device_alloc::DeviceAlloc;
 
 pub(crate) struct RequestQueue {
@@ -168,7 +169,29 @@ impl VirtioBlkDriver {
 		// At this point the device is "live"
 		self.com_cfg.drv_ok();
 
-		self.test_device();
+		// match self.test_device() {
+		// 	Ok(()) => info!("Test Succesful!"),
+		// 	Err(e) => {
+		// 		error!("Virtio-blk test failed: {e:?}");
+		// 		return Err(e);
+		// 	}
+		// }
+
+		// match self.test_sdmmc_adapter() {
+		// 	Ok(()) => info!("Test Succesful!"),
+		// 	Err(e) => {
+		// 		error!("Adapter test failed: {e:?}");
+		// 		return Err(e);
+		// 	}
+		// }
+
+		match self.test_fat() {
+			Ok(()) => info!("FAT Test Succesful!"),
+			Err(e) => {
+				error!("FAT test failed: {e:?}");
+				return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
+			}
+		}
 
 		Ok(())
 	}
@@ -184,26 +207,133 @@ impl VirtioBlkDriver {
 		info!("Writing to sector {sector:?}:");
 		info!("Write bytes: {:02x?}", &write_data[..4]);
 
-		self.send_req(virtio::blk::T::Out, sector, &write_data)?;
+		self.write_sector(sector, &write_data)?;
 
-		let read_buf = [0u8; 512];
-		let data = self
-			.send_req(virtio::blk::T::In, sector, &read_buf)?
-			.unwrap();
+		let mut read_buf = [0u8; 512];
+
+		self.read_sector(sector, &mut read_buf)?;
 
 		info!("Read from sector {sector:?}:");
-		info!("Data bytes: {:02x?}", &data[..4]);
-		info!("Data text: {:?}", core::str::from_utf8(&data[..4]));
+		info!("Data bytes: {:02x?}", &read_buf[..4]);
+		info!("Data text: {:?}", core::str::from_utf8(&read_buf[..4]));
 
 		Ok(())
 	}
 
-	pub fn alloc_req(
+	pub fn test_sdmmc_adapter(&mut self) -> Result<(), VirtioBlkError> {
+		info!("Testing SdmmcBlkAdapter");
+
+		let adapter = SdmmcBlkAdapter::new(self);
+
+		let mut write_blocks = [Block::new(); 1];
+		write_blocks[0].contents[..4].copy_from_slice(b"sdmc");
+
+		adapter.write(&write_blocks, BlockIdx(4))?;
+
+		let mut read_blocks = [Block::new(); 1];
+		adapter.read(&mut read_blocks, BlockIdx(4))?;
+
+		info!("Adapter read bytes: {:02x?}", &read_blocks[0].contents[..4]);
+		info!(
+			"Adapter read text: {:?}",
+			core::str::from_utf8(&read_blocks[0].contents[..4])
+		);
+
+		if &read_blocks[0].contents[..4] != b"sdmc" {
+			return Err(VirtioBlkError::BlkDevError(
+				adapter.dev.borrow().dev_cfg.dev_id,
+			));
+		}
+
+		Ok(())
+	}
+
+	pub fn test_fat(&mut self) -> Result<(), embedded_sdmmc::Error<VirtioBlkError>> {
+		let adapter = SdmmcBlkAdapter::new(self);
+		let volume_mgr = VolumeManager::new(adapter, DummyTimeSource);
+
+		let volume0 = volume_mgr.open_volume(VolumeIdx(0))?;
+		let root_dir = volume0.open_root_dir()?;
+
+		let file_name = "OHA.txt";
+		let file = root_dir.open_file_in_dir(file_name, Mode::ReadWriteCreateOrTruncate)?;
+
+		const TEXT: &[u8] = b"hello from virtio blk\n";
+		file.write(TEXT)?;
+		file.flush()?;
+		file.close()?;
+
+		let file_ro = root_dir.open_file_in_dir(file_name, Mode::ReadOnly)?;
+		while !file_ro.is_eof() {
+			let mut buf = [0u8; TEXT.len()];
+			let num_read = file_ro.read(&mut buf)?;
+
+			info!("Contents of: {file_name}");
+			for b in &buf[..num_read] {
+				info!("{}", *b as char);
+			}
+		}
+		Ok(())
+	}
+
+	pub fn read_sector(&mut self, sector: le64, buf: &mut [u8; 512]) -> Result<(), VirtioBlkError> {
+		let (hdr, data_vec, status) = self.alloc_req(virtio::blk::T::In, sector, buf)?;
+
+		let mut send = SmallVec::new();
+		send.push(BufferElem::Sized(hdr));
+
+		let mut recv = SmallVec::new();
+		recv.push(BufferElem::Vector(data_vec));
+		recv.push(BufferElem::Sized(status));
+
+		let mut request_result = self.send_req(send, recv)?;
+
+		// Check status byte
+		let recieved_data = request_result.used_recv_buff.pop_front_vec().unwrap();
+
+		let recieved_status = request_result.used_recv_buff.pop_front_raw().unwrap();
+		let status = recieved_status.0.downcast::<u8>().unwrap();
+
+		if *status != virtio::blk::S::OK as u8 {
+			info!("read status: {}", *status);
+			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
+		}
+
+		// Copy read data into the buffer
+		buf.copy_from_slice(&recieved_data);
+
+		Ok(())
+	}
+
+	pub fn write_sector(&mut self, sector: le64, buf: &[u8; 512]) -> Result<(), VirtioBlkError> {
+		let (hdr, data_vec, status) = self.alloc_req(virtio::blk::T::Out, sector, buf)?;
+
+		let mut send = SmallVec::new();
+		send.push(BufferElem::Sized(hdr));
+		send.push(BufferElem::Vector(data_vec));
+
+		let mut recv = SmallVec::new();
+		recv.push(BufferElem::Sized(status));
+
+		let mut request_result = self.send_req(send, recv)?;
+
+		// Check status byte
+		let recieved_status = request_result.used_recv_buff.pop_front_raw().unwrap();
+		let status = recieved_status.0.downcast::<u8>().unwrap();
+
+		if *status != virtio::blk::S::OK as u8 {
+			info!("write status: {}", *status);
+			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
+		}
+
+		Ok(())
+	}
+
+	fn alloc_req(
 		&self,
 		ty: virtio::blk::T,
 		sector: le64,
-		data: &[u8],
-		dev_id: u16,
+		buf: &[u8],
 	) -> Result<
 		(
 			Box<ReqHdr, DeviceAlloc>,
@@ -212,49 +342,26 @@ impl VirtioBlkDriver {
 		),
 		VirtioBlkError,
 	> {
-		let req_hdr = ReqHdr {
+		let hdr = ReqHdr {
 			ty: (ty as u32).into(),
 			reserved: le32::from_ne(0),
 			sector,
 		};
 
-		let hdr_box = Box::new_in(req_hdr, DeviceAlloc);
-		let data_vec = data.to_vec_in(DeviceAlloc);
+		let hdr_box = Box::new_in(hdr, DeviceAlloc);
+		let data_vec = buf.to_vec_in(DeviceAlloc);
 		let status = Box::new_in(0, DeviceAlloc);
 
 		Ok((hdr_box, data_vec, status))
 	}
 
-	pub fn send_req(
+	fn send_req(
 		&mut self,
-		ty: virtio::blk::T,
-		sector: le64,
-		data: &[u8],
-	) -> Result<Option<Vec<u8, DeviceAlloc>>, VirtioBlkError> {
-		if !matches!(ty, virtio::blk::T::Out | virtio::blk::T::In) {
-			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
-		}
-
-		let (hdr, data, status) = self.alloc_req(ty, sector, data, self.dev_cfg.dev_id)?;
-
-		let mut send = SmallVec::new();
-		send.push(BufferElem::Sized(hdr));
-		let mut recv = SmallVec::new();
-
-		match ty {
-			virtio::blk::T::In => {
-				recv.push(BufferElem::Vector(data));
-			}
-			virtio::blk::T::Out => {
-				send.push(BufferElem::Vector(data));
-			}
-			_ => return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id)),
-		}
-
-		recv.push(BufferElem::Sized(status));
-
+		send: SmallVec<[BufferElem; 2]>,
+		recv: SmallVec<[BufferElem; 2]>,
+	) -> Result<UsedBufferToken, VirtioBlkError> {
 		let buffer_tkn = AvailBufferToken::new(send, recv).unwrap();
-		let mut request_result = self
+		let request_result = self
 			.request_vq
 			.vq
 			.as_mut()
@@ -262,25 +369,66 @@ impl VirtioBlkDriver {
 			.dispatch_blocking(buffer_tkn, BufferType::Direct)
 			.map_err(|_| VirtioBlkError::BlkDevError(self.dev_cfg.dev_id))?;
 
-		// Check status byte
-		let recieved_data = if ty == virtio::blk::T::In {
-			Some(request_result.used_recv_buff.pop_front_vec().unwrap())
-		} else {
-			None
-		};
+		Ok(request_result)
+	}
+}
 
-		let recieved_status = request_result.used_recv_buff.pop_front_raw().unwrap();
-		let status = recieved_status.0.downcast::<u8>().unwrap();
+// Wrapper struct to use file system crate
+pub struct SdmmcBlkAdapter<'a> {
+	pub dev: RefCell<&'a mut VirtioBlkDriver>,
+}
 
-		if *status != virtio::blk::S::OK as u8 {
-			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
+impl<'a> SdmmcBlkAdapter<'a> {
+	pub fn new(dev: &'a mut VirtioBlkDriver) -> Self {
+		Self {
+			dev: RefCell::new(dev),
 		}
+	}
+}
 
-		if ty == virtio::blk::T::In {
-			return Ok(recieved_data);
+impl<'a> BlockDevice for SdmmcBlkAdapter<'a> {
+	type Error = VirtioBlkError;
+
+	fn read(&self, blocks: &mut [Block], start_block_idx: BlockIdx) -> Result<(), Self::Error> {
+		let mut dev = self.dev.borrow_mut();
+
+		for (i, block) in blocks.iter_mut().enumerate() {
+			let sector = le64::from_ne(u64::from(start_block_idx.0) + i as u64);
+			dev.read_sector(sector, &mut block.contents)?;
 		}
+		Ok(())
+	}
 
-		Ok(None)
+	fn write(&self, blocks: &[Block], start_block_idx: BlockIdx) -> Result<(), Self::Error> {
+		let mut dev = self.dev.borrow_mut();
+
+		for (i, block) in blocks.iter().enumerate() {
+			let sector = le64::from_ne(u64::from(start_block_idx.0) + i as u64);
+			dev.write_sector(sector, &block.contents)?;
+		}
+		Ok(())
+	}
+
+	fn num_blocks(&self) -> Result<BlockCount, Self::Error> {
+		let dev = self.dev.borrow();
+		let blocks = dev.dev_cfg.raw.as_ptr().capacity().read().to_ne();
+
+		Ok(BlockCount(blocks as u32))
+	}
+}
+
+pub struct DummyTimeSource;
+
+impl TimeSource for DummyTimeSource {
+	fn get_timestamp(&self) -> Timestamp {
+		Timestamp {
+			year_since_1970: 56,
+			zero_indexed_month: 0,
+			zero_indexed_day: 0,
+			hours: 0,
+			minutes: 0,
+			seconds: 0,
+		}
 	}
 }
 
