@@ -170,7 +170,7 @@ impl VirtioBlkDriver {
 		self.com_cfg.drv_ok();
 
 		// match self.test_device() {
-		// 	Ok(()) => info!("Test Succesful!"),
+		// 	Ok(()) => info!("Test Successful!"),
 		// 	Err(e) => {
 		// 		error!("Virtio-blk test failed: {e:?}");
 		// 		return Err(e);
@@ -178,7 +178,7 @@ impl VirtioBlkDriver {
 		// }
 
 		// match self.test_sdmmc_adapter() {
-		// 	Ok(()) => info!("Test Succesful!"),
+		// 	Ok(()) => info!("Test Successful!"),
 		// 	Err(e) => {
 		// 		error!("Adapter test failed: {e:?}");
 		// 		return Err(e);
@@ -186,7 +186,7 @@ impl VirtioBlkDriver {
 		// }
 
 		match self.test_fat() {
-			Ok(()) => info!("FAT Test Succesful!"),
+			Ok(()) => info!("FAT Test Successful!"),
 			Err(e) => {
 				error!("FAT test failed: {e:?}");
 				return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
@@ -289,10 +289,10 @@ impl VirtioBlkDriver {
 		let mut request_result = self.send_req(send, recv)?;
 
 		// Check status byte
-		let recieved_data = request_result.used_recv_buff.pop_front_vec().unwrap();
+		let received_data = request_result.used_recv_buff.pop_front_vec().unwrap();
 
-		let recieved_status = request_result.used_recv_buff.pop_front_raw().unwrap();
-		let status = recieved_status.0.downcast::<u8>().unwrap();
+		let received_status = request_result.used_recv_buff.pop_front_raw().unwrap();
+		let status = received_status.0.downcast::<u8>().unwrap();
 
 		if *status != virtio::blk::S::OK as u8 {
 			info!("read status: {}", *status);
@@ -300,7 +300,7 @@ impl VirtioBlkDriver {
 		}
 
 		// Copy read data into the buffer
-		buf.copy_from_slice(&recieved_data);
+		buf.copy_from_slice(&received_data);
 
 		Ok(())
 	}
@@ -318,8 +318,8 @@ impl VirtioBlkDriver {
 		let mut request_result = self.send_req(send, recv)?;
 
 		// Check status byte
-		let recieved_status = request_result.used_recv_buff.pop_front_raw().unwrap();
-		let status = recieved_status.0.downcast::<u8>().unwrap();
+		let received_status = request_result.used_recv_buff.pop_front_raw().unwrap();
+		let status = received_status.0.downcast::<u8>().unwrap();
 
 		if *status != virtio::blk::S::OK as u8 {
 			info!("write status: {}", *status);

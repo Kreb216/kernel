@@ -46,7 +46,7 @@ impl VirtioBlkDriver {
 			isr_stat: isr_cfg,
 			notif_cfg,
 			irq: device.get_irq().unwrap(),
-			request_vq: RequestQueue::new(), //TODO
+			request_vq: RequestQueue::new(),
 		})
 	}
 
