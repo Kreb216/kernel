@@ -424,7 +424,6 @@ impl PciDriver {
 				(irq_number, console_handler)
 			}
 
-			#[cfg(feature = "virtio-vsock")]
 			Self::VirtioBlk(drv) => {
 				fn blk_handler() {
 					let Some(driver) = get_blk_driver() else {
