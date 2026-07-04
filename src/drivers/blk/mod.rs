@@ -360,14 +360,15 @@ impl VirtioBlkDriver {
 		send: SmallVec<[BufferElem; 2]>,
 		recv: SmallVec<[BufferElem; 2]>,
 	) -> Result<UsedBufferToken, VirtioBlkError> {
+		let dev_id = self.get_dev_id();
 		let buffer_tkn = AvailBufferToken::new(send, recv).unwrap();
 		let request_result = self
 			.request_vq
 			.vq
 			.as_mut()
-			.ok_or(VirtioBlkError::BlkDevError(self.get_dev_id()))?
+			.ok_or(VirtioBlkError::BlkDevError(dev_id))?
 			.dispatch_blocking(buffer_tkn, BufferType::Direct)
-			.map_err(|_| VirtioBlkError::BlkDevError(self.get_dev_id()))?;
+			.map_err(|_| VirtioBlkError::BlkDevError(dev_id))?;
 
 		Ok(request_result)
 	}
