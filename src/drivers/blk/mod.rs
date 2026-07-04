@@ -82,7 +82,7 @@ impl Driver for VirtioBlkDriver {
 impl VirtioBlkDriver {
 	#[cfg(feature = "pci")]
 	pub fn get_dev_id(&self) -> u16 {
-		self.dev_cfg.dev_id
+		self.get_dev_id()
 	}
 
 	#[cfg(feature = "pci")]
@@ -140,7 +140,7 @@ impl VirtioBlkDriver {
 		if self.com_cfg.check_features() {
 			info!(
 				"Features have been negotiated between virtio block device {:x} and driver.",
-				self.dev_cfg.dev_id
+				self.get_dev_id()
 			);
 			// Set feature set in device config fur future use.
 			self.dev_cfg.features = negotiated_features;
@@ -296,7 +296,7 @@ impl VirtioBlkDriver {
 
 		if *status != virtio::blk::S::OK as u8 {
 			info!("read status: {}", *status);
-			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
+			return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
 		}
 
 		// Copy read data into the buffer
@@ -323,7 +323,7 @@ impl VirtioBlkDriver {
 
 		if *status != virtio::blk::S::OK as u8 {
 			info!("write status: {}", *status);
-			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
+			return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
 		}
 
 		Ok(())
@@ -365,9 +365,9 @@ impl VirtioBlkDriver {
 			.request_vq
 			.vq
 			.as_mut()
-			.ok_or(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id))?
+			.ok_or(VirtioBlkError::BlkDevError(self.get_dev_id()))?
 			.dispatch_blocking(buffer_tkn, BufferType::Direct)
-			.map_err(|_| VirtioBlkError::BlkDevError(self.dev_cfg.dev_id))?;
+			.map_err(|_| VirtioBlkError::BlkDevError(self.get_dev_id()))?;
 
 		Ok(request_result)
 	}
