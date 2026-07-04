@@ -82,7 +82,7 @@ impl Driver for VirtioBlkDriver {
 impl VirtioBlkDriver {
 	#[cfg(feature = "pci")]
 	pub fn get_dev_id(&self) -> u16 {
-		self.get_dev_id()
+		self.dev_cfg.dev_id
 	}
 
 	#[cfg(feature = "pci")]
