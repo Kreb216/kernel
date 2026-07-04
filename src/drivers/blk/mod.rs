@@ -2,6 +2,7 @@
 
 #[cfg(feature = "pci")]
 pub mod pci;
+pub mod tests;
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::cell::RefCell;
@@ -129,7 +130,7 @@ impl VirtioBlkDriver {
 
 		if !negotiated_features.contains(minimal_features) {
 			error!("Device features set, does not satisfy minimal features needed. Aborting!");
-			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
+			return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
 		}
 
 		// Indicates the device, that the current feature set is final for the driver
@@ -146,7 +147,7 @@ impl VirtioBlkDriver {
 			self.dev_cfg.features = negotiated_features;
 		} else {
 			error!("The device does not support our subset of features.");
-			return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
+			return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
 		}
 
 		//TODO: Device specific initialization
@@ -185,98 +186,42 @@ impl VirtioBlkDriver {
 		// 	}
 		// }
 
-		match self.test_fat() {
-			Ok(()) => info!("FAT Test Successful!"),
+		// match self.test_fat() {
+		// 	Ok(()) => info!("FAT Test Successful!"),
+		// 	Err(e) => {
+		// 		error!("FAT test failed: {e:?}");
+		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
+		// 	}
+		// }
+
+		// match self.test_seq_write_sdmmc() {
+		// 	Ok(()) => info!("Sequential write test successful!"),
+		// 	Err(e) => {
+		// 		error!("Sequential write test: {e:?}");
+		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
+		// 	}
+		// }
+
+		// match self.test_seq_read_sdmmc() {
+		// 	Ok(()) => info!("Sequential read test successful!"),
+		// 	Err(e) => {
+		// 		error!("Sequential read test: {e:?}");
+		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
+		// 	}
+		// }
+
+		match self.test_seq_write_raw() {
+			Ok(()) => info!("Sequential raw write test successful!"),
 			Err(e) => {
-				error!("FAT test failed: {e:?}");
-				return Err(VirtioBlkError::BlkDevError(self.dev_cfg.dev_id));
+				error!("Sequential raw write test: {e:?}");
+				return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
 			}
 		}
 
 		Ok(())
 	}
 
-	pub fn test_device(&mut self) -> Result<(), VirtioBlkError> {
-		info!("Perform device test");
-
-		let sector = le64::from_ne(3);
-
-		let mut write_data = [0u8; 512];
-		write_data[..4].copy_from_slice(b"test");
-
-		info!("Writing to sector {sector:?}:");
-		info!("Write bytes: {:02x?}", &write_data[..4]);
-
-		self.write_sector(sector, &write_data)?;
-
-		let mut read_buf = [0u8; 512];
-
-		self.read_sector(sector, &mut read_buf)?;
-
-		info!("Read from sector {sector:?}:");
-		info!("Data bytes: {:02x?}", &read_buf[..4]);
-		info!("Data text: {:?}", core::str::from_utf8(&read_buf[..4]));
-
-		Ok(())
-	}
-
-	pub fn test_sdmmc_adapter(&mut self) -> Result<(), VirtioBlkError> {
-		info!("Testing SdmmcBlkAdapter");
-
-		let adapter = SdmmcBlkAdapter::new(self);
-
-		let mut write_blocks = [Block::new(); 1];
-		write_blocks[0].contents[..4].copy_from_slice(b"sdmc");
-
-		adapter.write(&write_blocks, BlockIdx(4))?;
-
-		let mut read_blocks = [Block::new(); 1];
-		adapter.read(&mut read_blocks, BlockIdx(4))?;
-
-		info!("Adapter read bytes: {:02x?}", &read_blocks[0].contents[..4]);
-		info!(
-			"Adapter read text: {:?}",
-			core::str::from_utf8(&read_blocks[0].contents[..4])
-		);
-
-		if &read_blocks[0].contents[..4] != b"sdmc" {
-			return Err(VirtioBlkError::BlkDevError(
-				adapter.dev.borrow().dev_cfg.dev_id,
-			));
-		}
-
-		Ok(())
-	}
-
-	pub fn test_fat(&mut self) -> Result<(), embedded_sdmmc::Error<VirtioBlkError>> {
-		let adapter = SdmmcBlkAdapter::new(self);
-		let volume_mgr = VolumeManager::new(adapter, DummyTimeSource);
-
-		let volume0 = volume_mgr.open_volume(VolumeIdx(0))?;
-		let root_dir = volume0.open_root_dir()?;
-
-		let file_name = "OHA.txt";
-		let file = root_dir.open_file_in_dir(file_name, Mode::ReadWriteCreateOrTruncate)?;
-
-		const TEXT: &[u8] = b"hello from virtio blk\n";
-		file.write(TEXT)?;
-		file.flush()?;
-		file.close()?;
-
-		let file_ro = root_dir.open_file_in_dir(file_name, Mode::ReadOnly)?;
-		while !file_ro.is_eof() {
-			let mut buf = [0u8; TEXT.len()];
-			let num_read = file_ro.read(&mut buf)?;
-
-			info!("Contents of: {file_name}");
-			for b in &buf[..num_read] {
-				info!("{}", *b as char);
-			}
-		}
-		Ok(())
-	}
-
-	pub fn read_sector(&mut self, sector: le64, buf: &mut [u8; 512]) -> Result<(), VirtioBlkError> {
+	pub fn read_sectors(&mut self, sector: le64, buf: &mut [u8]) -> Result<(), VirtioBlkError> {
 		let (hdr, data_vec, status) = self.alloc_req(virtio::blk::T::In, sector, buf)?;
 
 		let mut send = SmallVec::new();
@@ -305,7 +250,11 @@ impl VirtioBlkDriver {
 		Ok(())
 	}
 
-	pub fn write_sector(&mut self, sector: le64, buf: &[u8; 512]) -> Result<(), VirtioBlkError> {
+	pub fn write_sectors(&mut self, sector: le64, buf: &[u8]) -> Result<(), VirtioBlkError> {
+		if !buf.len().is_multiple_of(512) {
+			return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
+		}
+
 		let (hdr, data_vec, status) = self.alloc_req(virtio::blk::T::Out, sector, buf)?;
 
 		let mut send = SmallVec::new();
@@ -395,7 +344,7 @@ impl<'a> BlockDevice for SdmmcBlkAdapter<'a> {
 
 		for (i, block) in blocks.iter_mut().enumerate() {
 			let sector = le64::from_ne(u64::from(start_block_idx.0) + i as u64);
-			dev.read_sector(sector, &mut block.contents)?;
+			dev.read_sectors(sector, &mut block.contents)?;
 		}
 		Ok(())
 	}
@@ -405,7 +354,7 @@ impl<'a> BlockDevice for SdmmcBlkAdapter<'a> {
 
 		for (i, block) in blocks.iter().enumerate() {
 			let sector = le64::from_ne(u64::from(start_block_idx.0) + i as u64);
-			dev.write_sector(sector, &block.contents)?;
+			dev.write_sectors(sector, &block.contents)?;
 		}
 		Ok(())
 	}
