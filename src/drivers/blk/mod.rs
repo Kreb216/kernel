@@ -240,13 +240,13 @@ impl VirtioBlkDriver {
 		// 	}
 		// }
 
-		// match self.test_seq_read_raw() {
-		// 	Ok(()) => info!("Sequential raw read test successful!"),
-		// 	Err(e) => {
-		// 		error!("Sequential raw read test: {e:?}");
-		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
-		// 	}
-		// }
+		match self.test_seq_read_raw() {
+			Ok(()) => info!("Sequential raw read test successful!"),
+			Err(e) => {
+				error!("Sequential raw read test: {e:?}");
+				return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
+			}
+		}
 
 		// match self.test_rnd_write_raw() {
 		// 	Ok(()) => info!("Random raw write test successful!"),

@@ -422,7 +422,7 @@ impl VirtioBlkDriver {
 
 	pub fn test_seq_write_sdmmc(&mut self) -> Result<(), embedded_sdmmc::Error<VirtioBlkError>> {
 		//Prep
-		const TOTAL_SIZE: usize = 16 * 1024 * 1024; // MiB
+		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
 		const CHUNK_SIZE: usize = 512; // chunks
 
 		let total_size_mib = TOTAL_SIZE as f64 / 1024.0 / 1024.0;
@@ -472,7 +472,7 @@ impl VirtioBlkDriver {
 
 	pub fn test_seq_read_sdmmc(&mut self) -> Result<(), embedded_sdmmc::Error<VirtioBlkError>> {
 		//Prep
-		const TOTAL_SIZE: usize = 16 * 1024 * 1024; // MiB
+		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
 		const CHUNK_SIZE: usize = 512; // KiB chunks
 
 		let total_size_mib = TOTAL_SIZE as f64 / 1024.0 / 1024.0;
