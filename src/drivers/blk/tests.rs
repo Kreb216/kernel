@@ -287,7 +287,7 @@ impl VirtioBlkDriver {
 		let throughput = total_size_mib / elapsed_seconds;
 		let iops = OP_AMOUNT as f64 / elapsed_seconds;
 
-		info!("Sequential random write test finished:");
+		info!("Random write test finished:");
 		info!("Elapsed: {:.8} s", elapsed_seconds);
 		info!("Throughput: {:.3} MiB/s", throughput);
 		info!("IOPS: {:.3}", iops);
@@ -343,7 +343,7 @@ impl VirtioBlkDriver {
 		let throughput = total_size_mib / elapsed_seconds;
 		let iops = OP_AMOUNT as f64 / elapsed_seconds;
 
-		info!("Sequential random read test finished:");
+		info!("Random read test finished:");
 		info!("Elapsed: {:.8} s", elapsed_seconds);
 		info!("Throughput: {:.3} MiB/s", throughput);
 		info!("IOPS: {:.3}", iops);
@@ -472,8 +472,8 @@ impl VirtioBlkDriver {
 
 	pub fn test_seq_read_sdmmc(&mut self) -> Result<(), embedded_sdmmc::Error<VirtioBlkError>> {
 		//Prep
-		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
-		const CHUNK_SIZE: usize = 64 * 1024; // KiB chunks
+		const TOTAL_SIZE: usize = 16 * 1024 * 1024; // MiB
+		const CHUNK_SIZE: usize = 512; // KiB chunks
 
 		let total_size_mib = TOTAL_SIZE as f64 / 1024.0 / 1024.0;
 		let chunk_size_kib = CHUNK_SIZE as f64 / 1024.0;
@@ -554,8 +554,25 @@ impl VirtioBlkDriver {
 		let volume0 = volume_mgr.open_volume(VolumeIdx(0))?;
 		let root_dir = volume0.open_root_dir()?;
 		let file_name = "RNDWR.BIN";
-		let file = root_dir.open_file_in_dir(file_name, Mode::ReadWriteCreateOrTruncate)?;
 
+		{
+			let file = root_dir.open_file_in_dir(file_name, Mode::ReadWriteCreateOrTruncate)?;
+
+			let mut write_buf = [0u8; CHUNK_SIZE];
+			Self::fill_buffer(&mut write_buf);
+
+			let mut written_size = 0;
+
+			while written_size < TOTAL_SIZE {
+				file.write(&write_buf)?;
+				written_size += CHUNK_SIZE;
+			}
+
+			file.flush()?;
+			file.close()?;
+		}
+
+		let file = root_dir.open_file_in_dir(file_name, Mode::ReadWriteAppend)?;
 		let mut buf = [0u8; CHUNK_SIZE];
 		Self::fill_buffer(&mut buf);
 
@@ -567,8 +584,8 @@ impl VirtioBlkDriver {
 		let start = processor::get_timer_ticks();
 
 		for offset in offsets {
-			file.seek_from_start(offset);
-			file.write(&buf);
+			file.seek_from_start(offset)?;
+			file.write(&buf)?;
 		}
 
 		let end = processor::get_timer_ticks();
@@ -578,7 +595,7 @@ impl VirtioBlkDriver {
 		let throughput = total_size_mib / elapsed_seconds;
 		let iops = OP_AMOUNT as f64 / elapsed_seconds;
 
-		info!("Sequential random write test finished:");
+		info!("Random write test finished:");
 		info!("Elapsed: {:.8} s", elapsed_seconds);
 		info!("Throughput: {:.3} MiB/s", throughput);
 		info!("IOPS: {:.3}", iops);
@@ -591,8 +608,6 @@ impl VirtioBlkDriver {
 		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
 		const CHUNK_SIZE: usize = 4 * 1024; // KiB chunks
 		const OP_AMOUNT: usize = TOTAL_SIZE / CHUNK_SIZE;
-
-		let dev_id = Self::get_dev_id(&self);
 
 		let total_size_mib = TOTAL_SIZE as f64 / 1024.0 / 1024.0;
 		let chunk_size_kib = CHUNK_SIZE as f64 / 1024.0;
