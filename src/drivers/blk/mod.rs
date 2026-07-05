@@ -192,10 +192,10 @@ impl VirtioBlkDriver {
 		// 	}
 		// }
 
-		// match self.test_seq_write_sdmmc() {
-		// 	Ok(()) => info!("Sequential write test successful!"),
+		// match self.test_correctness_sdmmc() {
+		// 	Ok(()) => info!("Sdmmc corectness test successful!"),
 		// 	Err(e) => {
-		// 		error!("Sequential write test: {e:?}");
+		// 		error!("Sdmmc corectness test UNSUCCESFUL! {e:?}");
 		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
 		// 	}
 		// }
@@ -208,21 +208,29 @@ impl VirtioBlkDriver {
 		// 	}
 		// }
 
-		// match self.test_raw_correctness() {
+		// match self.test_rnd_write_sdmmc() {
+		// 	Ok(()) => info!("Random sdmmc write test successful!"),
+		// 	Err(e) => {
+		// 		error!("Random sdmmc write test: {e:?}");
+		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
+		// 	}
+		// }
+
+		match self.test_rnd_read_sdmmc() {
+			Ok(()) => info!("Random sdmmc read test successful!"),
+			Err(e) => {
+				error!("Random sdmmc read test: {e:?}");
+				return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
+			}
+		}
+
+		// match self.test_correctness_raw() {
 		// 	Ok(()) => info!("Raw corectness test successful!"),
 		// 	Err(e) => {
 		// 		error!("Raw corectness test UNSUCCESFUL! {e:?}");
 		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
 		// 	}
 		// }
-
-		match self.test_sdmmc_correctness() {
-			Ok(()) => info!("Sdmmc corectness test successful!"),
-			Err(e) => {
-				error!("Sdmmc corectness test UNSUCCESFUL! {e:?}");
-				return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
-			}
-		}
 
 		// match self.test_seq_write_raw() {
 		// 	Ok(()) => info!("Sequential raw write test successful!"),
@@ -236,6 +244,22 @@ impl VirtioBlkDriver {
 		// 	Ok(()) => info!("Sequential raw read test successful!"),
 		// 	Err(e) => {
 		// 		error!("Sequential raw read test: {e:?}");
+		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
+		// 	}
+		// }
+
+		// match self.test_rnd_write_raw() {
+		// 	Ok(()) => info!("Random raw write test successful!"),
+		// 	Err(e) => {
+		// 		error!("Random raw write test: {e:?}");
+		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
+		// 	}
+		// }
+
+		// match self.test_rnd_read_raw() {
+		// 	Ok(()) => info!("Random raw read test successful!"),
+		// 	Err(e) => {
+		// 		error!("Random raw read test: {e:?}");
 		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
 		// 	}
 		// }

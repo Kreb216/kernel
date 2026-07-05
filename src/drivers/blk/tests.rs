@@ -86,7 +86,8 @@ impl VirtioBlkDriver {
 		Ok(())
 	}
 
-	pub fn test_raw_correctness(&mut self) -> Result<(), VirtioBlkError> {
+	//RAW
+	pub fn test_correctness_raw(&mut self) -> Result<(), VirtioBlkError> {
 		//Prep
 		const TOTAL_SIZE: usize = 1 * 1024 * 1024; // MiB
 		const CHUNK_SIZE: usize = 4 * 1024; // KiB chunks
@@ -246,7 +247,112 @@ impl VirtioBlkDriver {
 		Ok(())
 	}
 
-	pub fn test_sdmmc_correctness(&mut self) -> Result<(), embedded_sdmmc::Error<VirtioBlkError>> {
+	pub fn test_rnd_write_raw(&mut self) -> Result<(), VirtioBlkError> {
+		//Prep
+		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
+		const CHUNK_SIZE: usize = 4 * 1024; // KiB chunks
+		const SECTOR_SIZE: usize = 512;
+		const START_SECTOR: u64 = 2048; // 1 MiB starting offset
+		const SECTOR_PER_CHUNK: u64 = (CHUNK_SIZE / SECTOR_SIZE) as u64;
+		const OP_AMOUNT: usize = TOTAL_SIZE / CHUNK_SIZE;
+
+		let mut sectors = [0u64; OP_AMOUNT];
+
+		for (i, sector) in sectors.iter_mut().enumerate() {
+			let chunk_idx = Self::access_pattern(OP_AMOUNT, i);
+			*sector = START_SECTOR + chunk_idx * SECTOR_PER_CHUNK;
+		}
+
+		let total_size_mib = TOTAL_SIZE as f64 / 1024.0 / 1024.0;
+		let chunk_size_kib = CHUNK_SIZE as f64 / 1024.0;
+
+		let mut buf = [0u8; CHUNK_SIZE];
+		Self::fill_buffer(&mut buf);
+
+		info!("Starting random raw write test:");
+		info!("Total size: {} MiB", total_size_mib);
+		info!("Chunk size: {} KiB", chunk_size_kib);
+
+		//Test
+		let start = processor::get_timer_ticks();
+
+		for sector in sectors {
+			self.write_sectors(le64::from_ne(sector), &buf)?;
+		}
+
+		let end = processor::get_timer_ticks();
+
+		//Output
+		let elapsed_seconds = (end - start) as f64 / 1_000_000.0;
+		let throughput = total_size_mib / elapsed_seconds;
+		let iops = OP_AMOUNT as f64 / elapsed_seconds;
+
+		info!("Sequential random write test finished:");
+		info!("Elapsed: {:.8} s", elapsed_seconds);
+		info!("Throughput: {:.3} MiB/s", throughput);
+		info!("IOPS: {:.3}", iops);
+
+		Ok(())
+	}
+
+	pub fn test_rnd_read_raw(&mut self) -> Result<(), VirtioBlkError> {
+		//Prep
+		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
+		const CHUNK_SIZE: usize = 4 * 1024; // KiB chunks
+		const SECTOR_SIZE: usize = 512;
+		const START_SECTOR: u64 = 2048; // 1 MiB starting offset
+		const SECTOR_PER_CHUNK: u64 = (CHUNK_SIZE / SECTOR_SIZE) as u64;
+		const OP_AMOUNT: usize = TOTAL_SIZE / CHUNK_SIZE;
+
+		let mut sectors = [0u64; OP_AMOUNT];
+
+		for (i, sector) in sectors.iter_mut().enumerate() {
+			let chunk_idx = Self::access_pattern(OP_AMOUNT, i);
+			*sector = START_SECTOR + chunk_idx * SECTOR_PER_CHUNK;
+		}
+
+		let total_size_mib = TOTAL_SIZE as f64 / 1024.0 / 1024.0;
+		let chunk_size_kib = CHUNK_SIZE as f64 / 1024.0;
+
+		{
+			let mut write_buf = [0u8; CHUNK_SIZE];
+			Self::fill_buffer(&mut write_buf);
+
+			for sector in sectors {
+				self.write_sectors(le64::from_ne(sector), &write_buf)?;
+			}
+		}
+
+		let mut read_buf = [0u8; CHUNK_SIZE];
+
+		info!("Starting random raw read test:");
+		info!("Total size: {} MiB", total_size_mib);
+		info!("Chunk size: {} KiB", chunk_size_kib);
+
+		//Test
+		let start = processor::get_timer_ticks();
+
+		for sector in sectors {
+			self.read_sectors(le64::from_ne(sector), &mut read_buf)?;
+		}
+
+		let end = processor::get_timer_ticks();
+
+		//Output
+		let elapsed_seconds = (end - start) as f64 / 1_000_000.0;
+		let throughput = total_size_mib / elapsed_seconds;
+		let iops = OP_AMOUNT as f64 / elapsed_seconds;
+
+		info!("Sequential random read test finished:");
+		info!("Elapsed: {:.8} s", elapsed_seconds);
+		info!("Throughput: {:.3} MiB/s", throughput);
+		info!("IOPS: {:.3}", iops);
+
+		Ok(())
+	}
+
+	//SDMMC
+	pub fn test_correctness_sdmmc(&mut self) -> Result<(), embedded_sdmmc::Error<VirtioBlkError>> {
 		//Prep
 		const TOTAL_SIZE: usize = 1 * 1024 * 1024; // MiB
 		const CHUNK_SIZE: usize = 4 * 1024; // KiB chunks
@@ -347,8 +453,9 @@ impl VirtioBlkDriver {
 			file.write(&buf)?;
 			written_size += CHUNK_SIZE;
 		}
-		//Output
+
 		let end = processor::get_timer_ticks();
+		//Output
 
 		file.flush()?;
 		file.close()?;
@@ -386,18 +493,10 @@ impl VirtioBlkDriver {
 
 			let mut written_size = 0;
 
-			let start = processor::get_timer_ticks();
 			while written_size < TOTAL_SIZE {
 				file.write(&write_buf)?;
 				written_size += CHUNK_SIZE;
 			}
-			let end = processor::get_timer_ticks();
-			let elapsed_seconds = (end - start) as f64 / 1_000_000.0;
-			let throughput = total_size_mib / elapsed_seconds;
-
-			info!("Read test PREP finished:");
-			info!("Elapsed: {:.8} s", elapsed_seconds);
-			info!("Throughput: {:.3} MiB/s", throughput);
 
 			file.flush()?;
 			file.close()?;
@@ -433,6 +532,134 @@ impl VirtioBlkDriver {
 		Ok(())
 	}
 
+	pub fn test_rnd_write_sdmmc(&mut self) -> Result<(), embedded_sdmmc::Error<VirtioBlkError>> {
+		//Prep
+		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
+		const CHUNK_SIZE: usize = 4 * 1024; // KiB chunks
+		const OP_AMOUNT: usize = TOTAL_SIZE / CHUNK_SIZE;
+
+		let total_size_mib = TOTAL_SIZE as f64 / 1024.0 / 1024.0;
+		let chunk_size_kib = CHUNK_SIZE as f64 / 1024.0;
+
+		let mut offsets = [0u32; OP_AMOUNT];
+
+		for (i, offset) in offsets.iter_mut().enumerate() {
+			let chunk_idx = Self::access_pattern(OP_AMOUNT, i);
+			*offset = (chunk_idx as usize * CHUNK_SIZE) as u32;
+		}
+
+		let adapter = SdmmcBlkAdapter::new(self);
+		let volume_mgr = VolumeManager::new(adapter, DummyTimeSource);
+
+		let volume0 = volume_mgr.open_volume(VolumeIdx(0))?;
+		let root_dir = volume0.open_root_dir()?;
+		let file_name = "RNDWR.BIN";
+		let file = root_dir.open_file_in_dir(file_name, Mode::ReadWriteCreateOrTruncate)?;
+
+		let mut buf = [0u8; CHUNK_SIZE];
+		Self::fill_buffer(&mut buf);
+
+		info!("Starting random raw write test:");
+		info!("Total size: {} MiB", total_size_mib);
+		info!("Chunk size: {} KiB", chunk_size_kib);
+
+		//Test
+		let start = processor::get_timer_ticks();
+
+		for offset in offsets {
+			file.seek_from_start(offset);
+			file.write(&buf);
+		}
+
+		let end = processor::get_timer_ticks();
+
+		//Output
+		let elapsed_seconds = (end - start) as f64 / 1_000_000.0;
+		let throughput = total_size_mib / elapsed_seconds;
+		let iops = OP_AMOUNT as f64 / elapsed_seconds;
+
+		info!("Sequential random write test finished:");
+		info!("Elapsed: {:.8} s", elapsed_seconds);
+		info!("Throughput: {:.3} MiB/s", throughput);
+		info!("IOPS: {:.3}", iops);
+
+		Ok(())
+	}
+
+	pub fn test_rnd_read_sdmmc(&mut self) -> Result<(), embedded_sdmmc::Error<VirtioBlkError>> {
+		//Prep
+		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
+		const CHUNK_SIZE: usize = 4 * 1024; // KiB chunks
+		const OP_AMOUNT: usize = TOTAL_SIZE / CHUNK_SIZE;
+
+		let dev_id = Self::get_dev_id(&self);
+
+		let total_size_mib = TOTAL_SIZE as f64 / 1024.0 / 1024.0;
+		let chunk_size_kib = CHUNK_SIZE as f64 / 1024.0;
+
+		let mut offsets = [0u32; OP_AMOUNT];
+
+		for (i, offset) in offsets.iter_mut().enumerate() {
+			let chunk_idx = Self::access_pattern(OP_AMOUNT, i);
+			*offset = (chunk_idx as usize * CHUNK_SIZE) as u32;
+		}
+
+		let adapter = SdmmcBlkAdapter::new(self);
+		let volume_mgr = VolumeManager::new(adapter, DummyTimeSource);
+
+		let volume0 = volume_mgr.open_volume(VolumeIdx(0))?;
+		let root_dir = volume0.open_root_dir()?;
+		let file_name = "RNDRD.BIN";
+
+		{
+			let file = root_dir.open_file_in_dir(file_name, Mode::ReadWriteCreateOrTruncate)?;
+
+			let mut write_buf = [0u8; CHUNK_SIZE];
+			Self::fill_buffer(&mut write_buf);
+
+			let mut written_size = 0;
+
+			while written_size < TOTAL_SIZE {
+				file.write(&write_buf)?;
+				written_size += CHUNK_SIZE;
+			}
+
+			file.flush()?;
+			file.close()?;
+		}
+
+		let file = root_dir.open_file_in_dir(file_name, Mode::ReadOnly)?;
+
+		let mut read_buf = [0u8; CHUNK_SIZE];
+
+		info!("Starting random sdmmc read test:");
+		info!("Total size: {} MiB", total_size_mib);
+		info!("Chunk size: {} KiB", chunk_size_kib);
+
+		//Test
+		let start = processor::get_timer_ticks();
+
+		for offset in offsets {
+			file.seek_from_start(offset)?;
+			file.read(&mut read_buf)?;
+		}
+
+		let end = processor::get_timer_ticks();
+
+		//Output
+		let elapsed_seconds = (end - start) as f64 / 1_000_000.0;
+		let throughput = total_size_mib / elapsed_seconds;
+		let iops = OP_AMOUNT as f64 / elapsed_seconds;
+
+		info!("Random sdmmc read test finished:");
+		info!("Elapsed: {:.8} s", elapsed_seconds);
+		info!("Throughput: {:.3} MiB/s", throughput);
+		info!("IOPS: {:.3}", iops);
+
+		Ok(())
+	}
+
+	//HELPER FUNC
 	fn fill_buffer(buf: &mut [u8]) {
 		for i in 0..buf.len() {
 			buf[i] = (i % 256) as u8;
@@ -443,5 +670,9 @@ impl VirtioBlkDriver {
 		for i in 0..buf.len() {
 			buf[i] = ((chunk_idx + i) % 256) as u8;
 		}
+	}
+
+	fn access_pattern(num_op: usize, idx: usize) -> u64 {
+		((idx * 7159) % num_op) as u64
 	}
 }
