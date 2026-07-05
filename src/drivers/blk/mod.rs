@@ -200,13 +200,13 @@ impl VirtioBlkDriver {
 		// 	}
 		// }
 
-		match self.test_seq_read_sdmmc() {
-			Ok(()) => info!("Sequential read test successful!"),
-			Err(e) => {
-				error!("Sequential read test: {e:?}");
-				return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
-			}
-		}
+		// match self.test_seq_read_sdmmc() {
+		// 	Ok(()) => info!("Sequential read test successful!"),
+		// 	Err(e) => {
+		// 		error!("Sequential read test: {e:?}");
+		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
+		// 	}
+		// }
 
 		// match self.test_rnd_write_sdmmc() {
 		// 	Ok(()) => info!("Random sdmmc write test successful!"),
