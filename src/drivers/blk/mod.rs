@@ -7,9 +7,7 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
-use embedded_sdmmc::{
-	Block, BlockCount, BlockDevice, BlockIdx, Mode, TimeSource, Timestamp, VolumeIdx, VolumeManager,
-};
+use embedded_sdmmc::{Block, BlockCount, BlockDevice, BlockIdx, TimeSource, Timestamp};
 use pci_types::InterruptLine;
 use smallvec::SmallVec;
 use virtio::blk::ConfigVolatileFieldAccess;
@@ -210,13 +208,37 @@ impl VirtioBlkDriver {
 		// 	}
 		// }
 
-		match self.test_seq_write_raw() {
-			Ok(()) => info!("Sequential raw write test successful!"),
+		// match self.test_raw_correctness() {
+		// 	Ok(()) => info!("Raw corectness test successful!"),
+		// 	Err(e) => {
+		// 		error!("Raw corectness test UNSUCCESFUL! {e:?}");
+		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
+		// 	}
+		// }
+
+		match self.test_sdmmc_correctness() {
+			Ok(()) => info!("Sdmmc corectness test successful!"),
 			Err(e) => {
-				error!("Sequential raw write test: {e:?}");
+				error!("Sdmmc corectness test UNSUCCESFUL! {e:?}");
 				return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
 			}
 		}
+
+		// match self.test_seq_write_raw() {
+		// 	Ok(()) => info!("Sequential raw write test successful!"),
+		// 	Err(e) => {
+		// 		error!("Sequential raw write test: {e:?}");
+		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
+		// 	}
+		// }
+
+		// match self.test_seq_read_raw() {
+		// 	Ok(()) => info!("Sequential raw read test successful!"),
+		// 	Err(e) => {
+		// 		error!("Sequential raw read test: {e:?}");
+		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
+		// 	}
+		// }
 
 		Ok(())
 	}
