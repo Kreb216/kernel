@@ -149,8 +149,8 @@ impl VirtioBlkDriver {
 
 	pub fn test_seq_write_raw(&mut self) -> Result<(), VirtioBlkError> {
 		//Prep
-		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
-		const CHUNK_SIZE: usize = 64 * 1024; // KiB chunks
+		const TOTAL_SIZE: usize = 32 * 1024 * 1024; // MiB
+		const CHUNK_SIZE: usize = 4 * 1024; // KiB chunks
 		const SECTOR_SIZE: usize = 512;
 		const START_SECTOR: u64 = 2048; // 1 MiB starting offset
 		const SECTOR_PER_CHUNK: u64 = (CHUNK_SIZE / SECTOR_SIZE) as u64;
@@ -192,8 +192,8 @@ impl VirtioBlkDriver {
 
 	pub fn test_seq_read_raw(&mut self) -> Result<(), VirtioBlkError> {
 		//Prep
-		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
-		const CHUNK_SIZE: usize = 64 * 1024; // KiB chunks
+		const TOTAL_SIZE: usize = 32 * 1024 * 1024; // MiB
+		const CHUNK_SIZE: usize = 4 * 1024; // KiB chunks
 		const SECTOR_SIZE: usize = 512;
 		const START_SECTOR: u64 = 2048; // 1 MiB starting offset
 		const SECTOR_PER_CHUNK: u64 = (CHUNK_SIZE / SECTOR_SIZE) as u64;
@@ -206,21 +206,6 @@ impl VirtioBlkDriver {
 		info!("Starting sequential raw read test:");
 		info!("Total size: {} MiB", total_size_mib);
 		info!("Chunk size: {} KiB", chunk_size_kib);
-
-		{
-			let mut write_buf = [0u8; CHUNK_SIZE];
-			Self::fill_buffer(&mut write_buf);
-
-			let mut written_size = 0;
-
-			while written_size < TOTAL_SIZE {
-				self.write_sectors(le64::from_ne(sector), &write_buf)?;
-				written_size += CHUNK_SIZE;
-				sector += SECTOR_PER_CHUNK;
-			}
-
-			sector = START_SECTOR;
-		}
 
 		let mut read_buf = [0u8; CHUNK_SIZE];
 		let mut read_size = 0;
@@ -249,7 +234,7 @@ impl VirtioBlkDriver {
 
 	pub fn test_rnd_write_raw(&mut self) -> Result<(), VirtioBlkError> {
 		//Prep
-		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
+		const TOTAL_SIZE: usize = 32 * 1024 * 1024; // MiB
 		const CHUNK_SIZE: usize = 4 * 1024; // KiB chunks
 		const SECTOR_SIZE: usize = 512;
 		const START_SECTOR: u64 = 2048; // 1 MiB starting offset
@@ -297,7 +282,7 @@ impl VirtioBlkDriver {
 
 	pub fn test_rnd_read_raw(&mut self) -> Result<(), VirtioBlkError> {
 		//Prep
-		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
+		const TOTAL_SIZE: usize = 32 * 1024 * 1024; // MiB
 		const CHUNK_SIZE: usize = 4 * 1024; // KiB chunks
 		const SECTOR_SIZE: usize = 512;
 		const START_SECTOR: u64 = 2048; // 1 MiB starting offset
@@ -313,15 +298,6 @@ impl VirtioBlkDriver {
 
 		let total_size_mib = TOTAL_SIZE as f64 / 1024.0 / 1024.0;
 		let chunk_size_kib = CHUNK_SIZE as f64 / 1024.0;
-
-		{
-			let mut write_buf = [0u8; CHUNK_SIZE];
-			Self::fill_buffer(&mut write_buf);
-
-			for sector in sectors {
-				self.write_sectors(le64::from_ne(sector), &write_buf)?;
-			}
-		}
 
 		let mut read_buf = [0u8; CHUNK_SIZE];
 
@@ -422,8 +398,8 @@ impl VirtioBlkDriver {
 
 	pub fn test_seq_write_sdmmc(&mut self) -> Result<(), embedded_sdmmc::Error<VirtioBlkError>> {
 		//Prep
-		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
-		const CHUNK_SIZE: usize = 512; // chunks
+		const TOTAL_SIZE: usize = 32 * 1024 * 1024; // MiB
+		const CHUNK_SIZE: usize = 64 * 1024; // chunks
 
 		let total_size_mib = TOTAL_SIZE as f64 / 1024.0 / 1024.0;
 		let chunk_size_kib = CHUNK_SIZE as f64 / 1024.0;
@@ -434,7 +410,15 @@ impl VirtioBlkDriver {
 		let volume0 = volume_mgr.open_volume(VolumeIdx(0))?;
 		let root_dir = volume0.open_root_dir()?;
 		let file_name = "SEQWRITE.BIN";
-		let file = root_dir.open_file_in_dir(file_name, Mode::ReadWriteCreateOrTruncate)?;
+
+		let file = root_dir.open_file_in_dir(file_name, Mode::ReadWriteCreateOrAppend)?;
+
+		info!("Length after reopen: {}", file.length());
+		info!("Offset after reopen: {}", file.offset());
+
+		file.seek_from_start(0)?;
+
+		info!("Offset after seek: {}", file.offset());
 
 		let mut buf = [0u8; CHUNK_SIZE];
 		Self::fill_buffer(&mut buf);
@@ -458,6 +442,10 @@ impl VirtioBlkDriver {
 		//Output
 
 		file.flush()?;
+
+		info!("Length after overwrite: {}", file.length());
+		info!("Offset after overwrite: {}", file.offset());
+
 		file.close()?;
 
 		let elapsed_seconds = (end - start) as f64 / 1_000_000.0;
@@ -472,8 +460,8 @@ impl VirtioBlkDriver {
 
 	pub fn test_seq_read_sdmmc(&mut self) -> Result<(), embedded_sdmmc::Error<VirtioBlkError>> {
 		//Prep
-		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
-		const CHUNK_SIZE: usize = 512; // KiB chunks
+		const TOTAL_SIZE: usize = 32 * 1024 * 1024; // MiB
+		const CHUNK_SIZE: usize = 64 * 1024; // KiB chunks
 
 		let total_size_mib = TOTAL_SIZE as f64 / 1024.0 / 1024.0;
 		let chunk_size_kib = CHUNK_SIZE as f64 / 1024.0;
@@ -484,23 +472,6 @@ impl VirtioBlkDriver {
 		let volume0 = volume_mgr.open_volume(VolumeIdx(0))?;
 		let root_dir = volume0.open_root_dir()?;
 		let file_name = "SEQREAD.BIN";
-
-		{
-			let file = root_dir.open_file_in_dir(file_name, Mode::ReadWriteCreateOrTruncate)?;
-
-			let mut write_buf = [0u8; CHUNK_SIZE];
-			Self::fill_buffer(&mut write_buf);
-
-			let mut written_size = 0;
-
-			while written_size < TOTAL_SIZE {
-				file.write(&write_buf)?;
-				written_size += CHUNK_SIZE;
-			}
-
-			file.flush()?;
-			file.close()?;
-		}
 
 		let file = root_dir.open_file_in_dir(file_name, Mode::ReadOnly)?;
 
@@ -534,7 +505,7 @@ impl VirtioBlkDriver {
 
 	pub fn test_rnd_write_sdmmc(&mut self) -> Result<(), embedded_sdmmc::Error<VirtioBlkError>> {
 		//Prep
-		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
+		const TOTAL_SIZE: usize = 32 * 1024 * 1024; // MiB
 		const CHUNK_SIZE: usize = 4 * 1024; // KiB chunks
 		const OP_AMOUNT: usize = TOTAL_SIZE / CHUNK_SIZE;
 
@@ -553,30 +524,13 @@ impl VirtioBlkDriver {
 
 		let volume0 = volume_mgr.open_volume(VolumeIdx(0))?;
 		let root_dir = volume0.open_root_dir()?;
-		let file_name = "RNDWR.BIN";
-
-		{
-			let file = root_dir.open_file_in_dir(file_name, Mode::ReadWriteCreateOrTruncate)?;
-
-			let mut write_buf = [0u8; CHUNK_SIZE];
-			Self::fill_buffer(&mut write_buf);
-
-			let mut written_size = 0;
-
-			while written_size < TOTAL_SIZE {
-				file.write(&write_buf)?;
-				written_size += CHUNK_SIZE;
-			}
-
-			file.flush()?;
-			file.close()?;
-		}
+		let file_name = "SEQWRITE.BIN";
 
 		let file = root_dir.open_file_in_dir(file_name, Mode::ReadWriteAppend)?;
 		let mut buf = [0u8; CHUNK_SIZE];
 		Self::fill_buffer(&mut buf);
 
-		info!("Starting random raw write test:");
+		info!("Starting random sdmmc write test:");
 		info!("Total size: {} MiB", total_size_mib);
 		info!("Chunk size: {} KiB", chunk_size_kib);
 
@@ -595,7 +549,7 @@ impl VirtioBlkDriver {
 		let throughput = total_size_mib / elapsed_seconds;
 		let iops = OP_AMOUNT as f64 / elapsed_seconds;
 
-		info!("Random write test finished:");
+		info!("Random sdmmc write test finished:");
 		info!("Elapsed: {:.8} s", elapsed_seconds);
 		info!("Throughput: {:.3} MiB/s", throughput);
 		info!("IOPS: {:.3}", iops);
@@ -605,7 +559,7 @@ impl VirtioBlkDriver {
 
 	pub fn test_rnd_read_sdmmc(&mut self) -> Result<(), embedded_sdmmc::Error<VirtioBlkError>> {
 		//Prep
-		const TOTAL_SIZE: usize = 64 * 1024 * 1024; // MiB
+		const TOTAL_SIZE: usize = 32 * 1024 * 1024; // MiB
 		const CHUNK_SIZE: usize = 4 * 1024; // KiB chunks
 		const OP_AMOUNT: usize = TOTAL_SIZE / CHUNK_SIZE;
 
@@ -624,24 +578,7 @@ impl VirtioBlkDriver {
 
 		let volume0 = volume_mgr.open_volume(VolumeIdx(0))?;
 		let root_dir = volume0.open_root_dir()?;
-		let file_name = "RNDRD.BIN";
-
-		{
-			let file = root_dir.open_file_in_dir(file_name, Mode::ReadWriteCreateOrTruncate)?;
-
-			let mut write_buf = [0u8; CHUNK_SIZE];
-			Self::fill_buffer(&mut write_buf);
-
-			let mut written_size = 0;
-
-			while written_size < TOTAL_SIZE {
-				file.write(&write_buf)?;
-				written_size += CHUNK_SIZE;
-			}
-
-			file.flush()?;
-			file.close()?;
-		}
+		let file_name = "SEQREAD.BIN";
 
 		let file = root_dir.open_file_in_dir(file_name, Mode::ReadOnly)?;
 

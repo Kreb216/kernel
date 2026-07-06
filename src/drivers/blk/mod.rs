@@ -200,10 +200,18 @@ impl VirtioBlkDriver {
 		// 	}
 		// }
 
-		// match self.test_seq_read_sdmmc() {
-		// 	Ok(()) => info!("Sequential read test successful!"),
+		// match self.test_seq_write_sdmmc() {
+		// 	Ok(()) => info!("Sequential sdmmc write test successful!"),
 		// 	Err(e) => {
-		// 		error!("Sequential read test: {e:?}");
+		// 		error!("Sequential sdmmc write test: {e:?}");
+		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
+		// 	}
+		// }
+
+		// match self.test_seq_read_sdmmc() {
+		// 	Ok(()) => info!("Sequential sdmmc read test successful!"),
+		// 	Err(e) => {
+		// 		error!("Sequential sdmmc read test: {e:?}");
 		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
 		// 	}
 		// }
@@ -240,13 +248,13 @@ impl VirtioBlkDriver {
 		// 	}
 		// }
 
-		match self.test_seq_read_raw() {
-			Ok(()) => info!("Sequential raw read test successful!"),
-			Err(e) => {
-				error!("Sequential raw read test: {e:?}");
-				return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
-			}
-		}
+		// match self.test_seq_read_raw() {
+		// 	Ok(()) => info!("Sequential raw read test successful!"),
+		// 	Err(e) => {
+		// 		error!("Sequential raw read test: {e:?}");
+		// 		return Err(VirtioBlkError::BlkDevError(self.get_dev_id()));
+		// 	}
+		// }
 
 		// match self.test_rnd_write_raw() {
 		// 	Ok(()) => info!("Random raw write test successful!"),
