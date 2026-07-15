@@ -14,6 +14,8 @@ pub mod pci;
 pub mod virtio;
 #[cfg(feature = "virtio-vsock")]
 pub mod vsock;
+//TODO: Implement feature
+pub mod blk;
 
 use alloc::collections::VecDeque;
 
